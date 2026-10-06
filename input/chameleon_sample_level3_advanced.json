@@ -1,0 +1,79 @@
+{
+  "task_id": "advanced_01",
+  "difficulty": "level_3_advanced",
+  "difficulty_label": "Level 3 \u2014 Advanced",
+  "notes": "Arbitrary text & images, deliberately awkward content, extreme unseen ratio. Separates the elite. Adversarial features present on purpose: a run-on headline, a variable-count set of badges, a rotated element, and one image element whose asset is intentionally MISSING from the assets bundle \u2014 the engine must not crash on it.",
+  "source": {
+    "canvas": { "width": 1080, "height": 1350 },
+    "elements": [
+      { "id": "bg", "type": "image", "x": 0, "y": 0, "width": 1080, "height": 1350,
+        "z_index": 0, "asset_id": "solstice_bg_gradient.png", "fit": "cover" },
+      { "id": "logo", "type": "image", "x": 380, "y": 50, "width": 320, "height": 100,
+        "z_index": 5, "asset_id": "solstice_logo_lockup.png", "fit": "contain" },
+      { "id": "product", "type": "image", "x": 340, "y": 180, "width": 400, "height": 400,
+        "z_index": 3, "asset_id": "solstice_bottle.png", "fit": "contain" },
+
+      { "id": "headline", "type": "text", "x": 90, "y": 620, "width": 900, "height": 220,
+        "z_index": 5,
+        "content": "Introducing the All-New Limited-Batch Solstice Chase the Light Botanical Sparkling Collection \u2014 Crafted Exclusively for Golden Hour Gatherings",
+        "font_family": "Solstice Serif", "font_size": 40, "font_weight": "bold",
+        "color": "rgba(255,255,255,1)", "text_align": "center" },
+      { "id": "subhead", "type": "text", "x": 120, "y": 860, "width": 840, "height": 140,
+        "z_index": 5,
+        "content": "Small-batch botanical infusions blended with wild honey, blood orange zest, and a whisper of smoked rosemary, bottled at the peak of golden hour for a taste that lingers long after sunset.",
+        "font_family": "Solstice Sans", "font_size": 22, "color": "rgba(255,255,255,0.9)",
+        "text_align": "center" },
+
+      { "id": "badge1_bg", "type": "shape", "x": 60, "y": 1020, "width": 290, "height": 50,
+        "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(232,106,58,1)",
+        "corner_radius": 25, "group_id": "badge1" },
+      { "id": "badge1_label", "type": "text", "x": 60, "y": 1032, "width": 290, "height": 26,
+        "z_index": 5, "content": "LIMITED EDITION", "font_family": "Solstice Sans",
+        "font_size": 15, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center", "group_id": "badge1" },
+
+      { "id": "badge2_bg", "type": "shape", "x": 370, "y": 1020, "width": 340, "height": 50,
+        "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(43,27,46,1)",
+        "corner_radius": 25, "group_id": "badge2" },
+      { "id": "badge2_label", "type": "text", "x": 370, "y": 1032, "width": 340, "height": 26,
+        "z_index": 5, "content": "AWARD WINNING 2026", "font_family": "Solstice Sans",
+        "font_size": 15, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center", "group_id": "badge2" },
+
+      { "id": "badge3_bg", "type": "shape", "x": 730, "y": 1020, "width": 260, "height": 50,
+        "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(232,106,58,1)",
+        "corner_radius": 25, "group_id": "badge3" },
+      { "id": "badge3_label", "type": "text", "x": 730, "y": 1032, "width": 260, "height": 26,
+        "z_index": 5, "content": "SMALL BATCH", "font_family": "Solstice Sans",
+        "font_size": 15, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center", "group_id": "badge3" },
+
+      { "id": "cta_bg", "type": "shape", "x": 330, "y": 1100, "width": 420, "height": 90,
+        "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(232,106,58,1)",
+        "corner_radius": 45, "group_id": "cta" },
+      { "id": "cta_label", "type": "text", "x": 330, "y": 1125, "width": 420, "height": 44,
+        "z_index": 5, "content": "Shop the Summer Line", "font_family": "Solstice Sans",
+        "font_size": 22, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center", "group_id": "cta" },
+
+      { "id": "ribbon_bg", "type": "shape", "x": 740, "y": 30, "width": 300, "height": 54,
+        "z_index": 4, "rotation": -12, "shape_type": "rectangle",
+        "fill_color": "rgba(220,60,50,1)", "group_id": "ribbon" },
+      { "id": "ribbon_label", "type": "text", "x": 740, "y": 40, "width": 300, "height": 34,
+        "z_index": 6, "rotation": -12, "content": "SUNSET SALE", "font_family": "Solstice Sans",
+        "font_size": 20, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center", "group_id": "ribbon" },
+
+      { "id": "holiday_watermark", "type": "image", "x": 850, "y": 1250, "width": 180, "height": 80,
+        "z_index": 2, "asset_id": "solstice_holiday_badge_2025.png",
+        "_adversarial_note": "This asset_id does NOT exist in /assets on purpose. The engine must handle a missing asset gracefully (e.g. skip it, placeholder it) rather than crash." },
+
+      { "id": "legal_text", "type": "text", "x": 60, "y": 1310, "width": 960, "height": 30,
+        "z_index": 6,
+        "content": "Please drink responsibly. Botanical Sparkling Co., 2026. Void where prohibited. See solstice.com/terms for full details.",
+        "font_family": "Solstice Sans", "font_size": 12, "color": "rgba(255,255,255,0.6)",
+        "text_align": "center" }
+    ]
+  },
+  "target_canvas": { "width": 728, "height": 90 }
+}

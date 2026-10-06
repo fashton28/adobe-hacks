@@ -1,0 +1,22 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# cr-renderer is a separate, external open-source project
+# (https://github.com/CyberAgentAILab/cr-renderer), pulled in locally for
+# reference/dev and installed by the engines via
+# `pip install git+https://github.com/CyberAgentAILab/cr-renderer` — not
+# vendored into this repo.
+/cr-renderer/
+
+# Generated run artifacts
+output/*
+!output/.gitkeep

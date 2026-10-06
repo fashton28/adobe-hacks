@@ -1,0 +1,24 @@
+{
+  "task_id": "warmup_01",
+  "difficulty": "level_1_warmup",
+  "difficulty_label": "Level 1 \u2014 Warm-up",
+  "notes": "A few elements, a nearby ratio. Most teams should clear this.",
+  "source": {
+    "canvas": { "width": 1080, "height": 1080 },
+    "elements": [
+      { "id": "bg", "type": "image", "x": 0, "y": 0, "width": 1080, "height": 1080,
+        "z_index": 0, "asset_id": "solstice_bg_gradient.png", "fit": "cover" },
+      { "id": "logo", "type": "image", "x": 380, "y": 60, "width": 320, "height": 100,
+        "z_index": 2, "asset_id": "solstice_logo_lockup.png", "fit": "contain" },
+      { "id": "headline", "type": "text", "x": 140, "y": 420, "width": 800, "height": 160,
+        "z_index": 2, "content": "Chase the Light", "font_family": "Solstice Serif",
+        "font_size": 60, "font_weight": "bold", "color": "rgba(255,255,255,1)",
+        "text_align": "center" },
+      { "id": "cta", "type": "text", "x": 140, "y": 620, "width": 800, "height": 60,
+        "z_index": 2, "content": "Shop the Summer Line", "font_family": "Solstice Sans",
+        "font_size": 30, "font_weight": "bold", "color": "rgba(232,106,58,1)",
+        "text_align": "center" }
+    ]
+  },
+  "target_canvas": { "width": 1080, "height": 1350 }
+}
