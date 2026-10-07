@@ -7,7 +7,7 @@ __pycache__/
 .pytest_cache/
 
 # Virtual environments
-.venv/
+.venv*/
 venv/
 
 # cr-renderer is a separate, external open-source project
