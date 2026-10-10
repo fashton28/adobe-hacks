@@ -1,0 +1,2 @@
+# Evaluation only; production resize/render dependencies remain in requirements.txt.
+jsonschema==4.26.0

@@ -72,6 +72,17 @@ def place_rigid(out: dict, src: dict, unit: dict, s: float, tx: float, ty: float
                     o[key] = m[key] * s
 
 
+def clamp_unit(out: dict, unit: dict) -> None:
+    """Translate all members together so rotated bounds stay on canvas."""
+    x0, y0, x1, y1 = union(aabb(out["elements"][i]) for i in unit["idx"])
+    W, H = out["canvas"]["width"], out["canvas"]["height"]
+    dx = max(0, -x0) - max(0, x1 - W)
+    dy = max(0, -y0) - max(0, y1 - H)
+    for i in unit["idx"]:
+        out["elements"][i]["x"] += dx
+        out["elements"][i]["y"] += dy
+
+
 def place_bg(out: dict, unit: dict) -> None:
     o = out["elements"][unit["idx"][0]]
     o["x"], o["y"] = 0, 0

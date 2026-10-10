@@ -41,6 +41,7 @@ def convert_chameleon_to_crello(
     doc: Dict[str, Any],
     font_manager,
     assets_dir: Optional[str] = None,
+    show_missing_assets: bool = False,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Convert a CHAMELEON design document to a Crello v5 example.
 
@@ -108,7 +109,8 @@ def convert_chameleon_to_crello(
             asset_id = element.get("asset_id")
             if asset_id and asset_path(assets_dir, asset_id) is None:
                 warnings.append(
-                    f"Missing asset '{asset_id}' for element '{eid}' - rendered a placeholder."
+                    f"Missing asset '{asset_id}' for element '{eid}' - "
+                    + ("rendered a diagnostic placeholder." if show_missing_assets else "not painted; element retained.")
                 )
             out["image"].append(
                 load_asset_image(
@@ -117,6 +119,7 @@ def convert_chameleon_to_crello(
                     element.get("width", 1.0),
                     element.get("height", 1.0),
                     element.get("fit", "contain"),
+                    show_missing_assets=show_missing_assets,
                 )
             )
         else:
@@ -252,6 +255,7 @@ def render_design_to_png(
     png_path: Union[str, Path],
     fonts_dir: Optional[Union[str, Path]] = None,
     max_size: Optional[int] = None,
+    show_missing_assets: bool = False,
 ) -> List[str]:
     """Render a CHAMELEON design (flat `{"canvas", "elements"}` shape) to a
     PNG file. This is what `engine/main.py` calls
@@ -261,12 +265,15 @@ def render_design_to_png(
     `brand_kit/assets` + `brand_kit/fonts`), matching this repo's layout.
     Returns the list of conversion warnings (missing assets, unknown
     element types, etc.) for the caller to log.
+    Missing assets retain their element and warning but paint transparently.
+    Set `show_missing_assets=True` for labeled diagnostic placeholders.
     """
     assets_dir = str(assets_dir)
     fonts_dir = str(fonts_dir) if fonts_dir is not None else str(Path(assets_dir).parent / "fonts")
 
     renderer = _get_renderer(fonts_dir)
-    example, warnings = convert_chameleon_to_crello(design, renderer.font_manager, assets_dir)
+    example, warnings = convert_chameleon_to_crello(design, renderer.font_manager, assets_dir,
+                                                   show_missing_assets=show_missing_assets)
     image_bytes = renderer.render(example, max_size=max_size or 2048, format="png")
     Path(png_path).write_bytes(image_bytes)
     return warnings

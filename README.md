@@ -1,8 +1,11 @@
 # CHAMELEON — starter repo
 
 This is the scaffolding for your engine. It handles input loading, output
-writing, rendering, and Docker packaging — so the only file you need to
-edit is **`engine/resize.py`**.
+writing, rendering, and Docker packaging. Resize strategies live in
+**`pipelines/`**; **`engine/resize.py`** delegates to the selected strategy.
+The default is `adaptive`, which searches rows, image/copy columns and image
+bands, balances supporting copy against headlines, and fits group labels.
+See [pipelines/README.md](pipelines/README.md) for comparisons.
 
 ```
 input:  a task JSON (source design + target canvas)
@@ -21,9 +24,12 @@ Both the JSON and the PNG are what get evaluated — see `RULES.md`.
 
 ```
 engine/
-  resize.py        <- implement your approach here
+  resize.py        <- delegates to the selected pipeline
   main.py           <- orchestrator (input -> resize() -> output). Don't need to edit this.
 renderer/           <- the real renderer (transformer-convertor + cr-renderer), already vendored
+pipelines/          <- registered resize strategies and shared fitting/validation
+scripts/            <- comparison runner, JSON metrics and HTML previews
+tests/              <- contract, layout, robustness and real-renderer regressions
 brand_kit/
   assets/           <- image files referenced by asset_id in the sample designs
   fonts/            <- font files matching the schema's font_family values
@@ -45,12 +51,26 @@ This processes every `*.json` file in `input/` (the 3 sample designs are
 already there — one per difficulty level) and writes an `_output.json` and
 `_output.png` for each into `output/`.
 
-The included baseline is a **uniform stretch** — deliberately the wrong
+The `stretch` reference is a **uniform stretch** — deliberately the wrong
 approach (see the main brief: "a naive program stretches the picture; a
 good one moves the furniture"). It's there so the pipeline runs on day
-one. Run it once, look at `output/*_output.png`, and you'll see exactly
-why it's not good enough — that's the point. Replace the body of
-`resize()` in `engine/resize.py`, not just its constants.
+one. Select it with `CHAMELEON_PIPELINE=stretch` to compare against the default.
+Add new approaches as registered folders under `pipelines/`.
+
+Install the evaluation dependency, run regressions and compare strategies:
+
+```bash
+pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+python -m scripts.run_matrix --pipelines adaptive --schema --variants --include-source --check-determinism --strict-quality
+python -m scripts.run_matrix --pipelines anchored layout_v1 flow adaptive --schema --render --reference-pipelines anchored layout_v1 flow --strict-quality
+```
+
+The comparison writes JSON outputs, per-element metrics, and an HTML report
+to `output/matrix/`. `--render` adds real source/output PNGs. Use `--targets`
+and `--pipelines` to narrow the sweep. Local scores are not official scores.
+See [EVALUATION.md](EVALUATION.md) for release gates, independent fixtures,
+visual review and the offline Docker check.
 
 ## What the self-check does (and doesn't do)
 

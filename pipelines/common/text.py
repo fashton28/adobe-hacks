@@ -1,14 +1,19 @@
-"""Text measurement / fitting using the brand fonts (Pillow only, no renderer dependency).
+"""Renderer-aware text measurement using local brand fonts, without PNG rendering.
 
-Mirrors the renderer's wrapping rule (greedy, breaks only at spaces, a word
-wider than the box overflows) so fit decisions match what gets drawn. Widths
-are measured at a fixed 100px reference size and scaled linearly.
+Skia advances match the vendored converter, including word wrapping, integer
+paint sizes and style runs. Pillow provides a conservative fallback when the
+renderer dependencies are absent. Neither path fetches fonts from the network.
 """
 
 from functools import lru_cache
 from pathlib import Path
 
 from PIL import ImageFont
+
+try:
+    import skia
+except ImportError:
+    skia = None
 
 FONTS_DIR = Path(__file__).resolve().parents[2] / "brand_kit" / "fonts"
 _REF = 100.0
@@ -29,7 +34,7 @@ def _font_path(family: str, bold: bool, italic: bool) -> str | None:
 
 @lru_cache(maxsize=None)
 def _ref_font(path: str):
-    return ImageFont.truetype(path, _REF)
+    return ImageFont.truetype(path, int(_REF))
 
 
 @lru_cache(maxsize=200_000)
@@ -48,31 +53,91 @@ def _style(el: dict) -> tuple[str | None, float]:
     return path, float(el.get("letter_spacing", 0.0) or 0.0)
 
 
+@lru_cache(maxsize=32)
+def _typeface(path: str):
+    # The bytes overload can borrow the Python buffer on Windows. Cached
+    # typefaces must own their data after this function returns.
+    return skia.Typeface.MakeFromData(skia.Data.MakeWithCopy(Path(path).read_bytes()))
+
+
+@lru_cache(maxsize=50_000)
+def _advances(path: str | None, text: str, size: float) -> tuple[float, ...]:
+    if skia is not None and path is not None:
+        font = skia.Font(_typeface(path), size)
+        return tuple(font.getWidths(font.textToGlyphs(text)))
+    return tuple(_ref_width(path, char) * size / _REF * _SAFETY for char in text)
+
+
 def measure(el: dict, size: float, width: float) -> tuple[int, float]:
-    """(line_count, widest_line_px) of el's content wrapped at `width` and `size`."""
-    path, ls = _style(el)
-    k = size / _REF * _SAFETY
+    """Measure by typography values, never by element id or object identity.
 
-    def w(s: str) -> float:
-        return _ref_width(path, s) * k + ls * len(s)
+    Row search asks for the same text/size/width many times. The bounded cache
+    includes every property that affects wrapping or painted advances, so
+    edited copy, spacing and style runs cannot reuse stale measurements.
+    """
+    runs = tuple(tuple((key, run[key]) for key in ("start", "end", "font_weight", "font_style") if key in run)
+                 for run in el.get("style_runs") or [])
+    return _measure_cached(el.get("font_family", ""), el.get("font_weight", "regular"),
+                           el.get("font_style", "normal"), str(el.get("content", "")),
+                           el.get("font_size", size), float(el.get("letter_spacing", 0) or 0),
+                           runs, size, width, skia is not None)
 
-    space = w(" ")
-    lines, widest = 0, 0.0
-    for para in str(el.get("content", "")).split("\n"):
-        cur = 0.0
-        started = False
-        lines += 1
-        for word in para.split(" "):
-            ww = w(word)
-            if started and cur + space + ww > width:
-                widest = max(widest, cur)
-                lines += 1
-                cur = ww
-            else:
-                cur = cur + space + ww if started else ww
-            started = True
-        widest = max(widest, cur)
-    return lines, widest
+
+@lru_cache(maxsize=16_384)
+def _measure_cached(family, weight, style, content, original_size, spacing, runs, size, width, use_skia):
+    el = {"font_family": family, "font_weight": weight, "font_style": style,
+          "content": content, "font_size": original_size, "letter_spacing": spacing,
+          "style_runs": [dict(run) for run in runs]}
+    return _measure_uncached(el, size, width)
+
+
+def _measure_uncached(el: dict, size: float, width: float) -> tuple[int, float]:
+    """Measure the converter's wrapping and painted advances without rendering.
+
+    Skia is used when installed (the production renderer requires it). Pillow
+    is a conservative development fallback. Wrapping uses the base font;
+    painting uses integer font sizes, spacing and inclusive style-run ends,
+    matching the vendored converter even where it differs from the schema.
+    Spacing scales with size, just as placement scales it in output JSON.
+    """
+    path, spacing = _style(el)
+    spacing *= size / max(el.get("font_size", size), 1)
+    content = str(el.get("content", ""))
+    advances = _advances(path, content, float(size))
+    chars = list(content)
+    line_width, last_space = 0.0, None
+    for i, char in enumerate(chars):
+        if char == "\n":
+            line_width, last_space = 0.0, None
+            continue
+        if line_width + advances[i] > width and last_space is not None:
+            chars[last_space] = "\n"
+            line_width = sum(advances[last_space + 1:i + 1])
+            last_space = None
+        else:
+            line_width += advances[i]
+        if char == " ":
+            last_space = i
+
+    styles = [(el.get("font_weight") == "bold", el.get("font_style") == "italic")] * len(chars)
+    for run in el.get("style_runs") or []:
+        for i in range(max(0, run.get("start", 0)), min(len(chars), run.get("end", len(chars) - 1) + 1)):
+            bold, italic = styles[i]
+            styles[i] = (run.get("font_weight", "bold" if bold else "regular") == "bold",
+                         run.get("font_style", "italic" if italic else "normal") == "italic")
+    painted = {}
+    for bold, italic in set(styles):
+        fp = _font_path(el.get("font_family", ""), bold, italic)
+        painted[bold, italic] = _advances(fp, content, float(max(1, int(size))))
+    lines, widest, cur, count = 1, 0.0, 0.0, 0
+    for i, char in enumerate(chars):
+        if char == "\n":
+            widest, cur, count = max(widest, cur), 0.0, 0
+            lines += 1
+        else:
+            cur += painted[styles[i]][i] + (spacing if count else 0)
+            count += 1
+    return lines, max(widest, cur)
 
 
 def text_height(el: dict, size: float, lines: int) -> float:
