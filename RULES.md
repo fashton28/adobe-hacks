@@ -15,6 +15,7 @@
 Both artifacts your engine produces are evaluated, not just one:
 
 - **The output JSON itself** — checked structurally: same element `id`s as the source (nothing added or removed), required fields present, nothing off-canvas, images kept in proportion, and so on.
+
 - **The rendered PNG** — your output JSON run through the official renderer, then scored by the AI evaluator against the rubric.
 
 A submission with plausible-looking JSON that doesn't actually render legibly doesn't get credit for the JSON, and a rendered image that happens to look fine despite a broken or dishonest JSON doesn't get credit for the image. Both are checked.
