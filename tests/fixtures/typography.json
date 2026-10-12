@@ -1,0 +1,14 @@
+{
+  "source": {
+    "canvas": {"width": 640, "height": 800},
+    "elements": [
+      {"id": "a", "type": "image", "x": 0, "y": 0, "width": 640, "height": 800, "asset_id": "solstice_bg_gradient.png", "fit": "cover", "z_index": 0},
+      {"id": "b", "type": "text", "x": 40, "y": 40, "width": 560, "height": 110, "content": "Gather. Taste. Remember.", "font_family": "Solstice Serif", "font_size": 36, "font_style": "italic", "color": "rgba(255,255,255,1)", "z_index": 1},
+      {"id": "c", "type": "text", "x": 40, "y": 180, "width": 560, "height": 160, "content": "An evening among friends and botanical flavors. Every ticket includes a guided tasting and a seat at our shared table.", "font_family": "Solstice Sans", "font_size": 22, "color": "rgba(255,255,255,1)", "z_index": 2},
+      {"id": "d", "type": "shape", "x": 70, "y": 430, "width": 500, "height": 100, "rotation": -8, "shape_type": "rectangle", "fill_color": "rgba(232,106,58,1)", "group_id": "x", "z_index": 3},
+      {"id": "e", "type": "text", "x": 90, "y": 455, "width": 460, "height": 50, "rotation": -8, "content": "Friday at six", "font_family": "Solstice Sans", "font_size": 26, "font_weight": "bold", "text_align": "center", "color": "rgba(255,255,255,1)", "group_id": "x", "z_index": 4},
+      {"id": "f", "type": "text", "x": 40, "y": 650, "width": 560, "height": 60, "content": "BotanicalSparklingCollection", "font_family": "Solstice Sans", "font_size": 18, "letter_spacing": 0.6, "color": "rgba(255,255,255,1)", "z_index": 5}
+    ]
+  },
+  "target_canvas": {"width": 980, "height": 180}
+}

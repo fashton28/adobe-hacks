@@ -15,8 +15,11 @@ PIPELINES = {
     "stretch": "pipelines.baseline_stretch.pipeline",
     "anchored": "pipelines.anchored.pipeline",
     "layout_v1": "pipelines.layout_v1.pipeline",
+    "hierarchy": "pipelines.hierarchy.pipeline",
+    "flow": "pipelines.flow.pipeline",
+    "adaptive": "pipelines.adaptive.pipeline",
 }
-DEFAULT = "layout_v1"
+DEFAULT = "adaptive"
 
 
 def get_pipeline(name: str | None = None) -> Callable:

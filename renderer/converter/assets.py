@@ -17,8 +17,9 @@ def load_asset_image(
     width: float,
     height: float,
     fit: str = "contain",
+    show_missing_assets: bool = False,
 ) -> Image.Image:
-    """Load an image element's asset, or a placeholder if it can't be found.
+    """Load an asset; leave absent artwork transparent unless debugging.
 
     `fit` (`contain`/`cover`/`fill`, per the v0.9 schema) is emulated here
     because cr-renderer itself just stretches whatever image it's given
@@ -26,7 +27,9 @@ def load_asset_image(
     """
     path = asset_path(assets_dir, asset_id)
     if path is None:
-        return _placeholder(asset_id, width, height)
+        if show_missing_assets:
+            return _placeholder(asset_id, width, height)
+        return Image.new("RGBA", (max(1, round(width)), max(1, round(height))), (0, 0, 0, 0))
     image = Image.open(path).convert("RGBA")
     return _fit_image(image, width, height, fit)
 
@@ -53,7 +56,9 @@ def _fit_image(image: Image.Image, width: float, height: float, fit: str) -> Ima
         nw, nh = max(1, round(image.width * scale)), max(1, round(image.height * scale))
         resized = image.resize((nw, nh), Image.LANCZOS)
         canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        canvas.paste(resized, ((w - nw) // 2, (h - nh) // 2), resized)
+        # Copy RGBA directly. Using the image as its own mask squares alpha,
+        # weakening antialiased edges and fine lettering during downscaling.
+        canvas.paste(resized, ((w - nw) // 2, (h - nh) // 2))
         return canvas
     if fit == "cover":
         scale = max(w / image.width, h / image.height)

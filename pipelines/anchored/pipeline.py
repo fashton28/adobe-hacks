@@ -7,7 +7,7 @@ always structurally valid; used as the fallback for smarter pipelines.
 
 from typing import Any
 
-from pipelines.common.units import build_units, copy_design, place_bg, place_decor, place_rigid
+from pipelines.common.units import build_units, clamp_unit, copy_design, place_bg, place_decor, place_rigid
 
 
 def resize(source: dict[str, Any], target_canvas: dict[str, Any]) -> dict[str, Any]:
@@ -23,6 +23,8 @@ def resize(source: dict[str, Any], target_canvas: dict[str, Any]) -> dict[str, A
         elif u["kind"] == "decor":
             place_decor(out, source, u, s)
         else:
-            x0, y0, _, _ = u["bbox"]
-            place_rigid(out, source, u, s, ox + x0 * s, oy + y0 * s)
+            x0, y0, x1, y1 = u["bbox"]
+            scale = min(s, W / max(x1 - x0, 1e-9), H / max(y1 - y0, 1e-9))
+            place_rigid(out, source, u, scale, ox + x0 * s, oy + y0 * s)
+            clamp_unit(out, u)
     return out
