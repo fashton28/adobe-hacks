@@ -63,6 +63,9 @@ def _candidates(source, target):
     yield "anchored", anchored_resize(source, target)
     yield "preserved", _preserved(source, target)
     yield from candidates(source, target, mode="stack", defer_missing=True)
+    # Art may grow independently of type; width-limited lone images saturate.
+    for name, out in candidates(source, target, mode="stack", image_scale=3.0, defer_missing=True):
+        yield f"big-images-{name}", out
     for image_scale in (1.0, 0.55):
         for name, out in candidates(source, target, mode="flow", image_scale=image_scale,
                                     gammas=(0.45, 0.65, 0.85, 1.0),

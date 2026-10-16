@@ -1,5 +1,17 @@
 # Tested strategies
 
+## Visual-review scoring pass (2026-10-16)
+
+Reviewed real renders of all samples x 11 targets. Fixes in `quality.score`:
+font-hierarchy preservation, secondary text/logo inflation vs the headline,
+choppy-wrap penalty, canvas/headline-relative size credit caps, and a group
+(pill) canvas-share penalty loosened for extreme aspect changes. `reflow`
+spreads vertical slack between rows and lets lone images fill row width;
+`adaptive` adds a large-image stack candidate. Results: footers/pills no longer
+outgrow headlines, 1600x400 has a dominant headline and smaller pills, narrow
+targets lose dead blocks. 728x90 Level 3 text remains ~6-10px. 36 tests pass;
+the strict/variant matrix was not re-run after the last two scoring changes.
+
 ## Banner visual correction (2026-10-10)
 
 The Level 3 wide banner exposed two gaps in numerical evaluation: a missing

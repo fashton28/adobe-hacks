@@ -66,17 +66,111 @@ def metrics(source: dict, out: dict) -> dict:
             "missing_assets": [im["asset_id"] for im in images if not im["available"]]}
 
 
+def hierarchy_penalty(source: dict, out: dict) -> float:
+    """Penalize text pairs whose size ratio collapses relative to the source.
+
+    If A was clearly larger than B in the source, A should stay at least
+    sqrt(source ratio) larger in the output; inversions cost the most.
+    """
+    src = {el["id"]: el["font_size"] for el in source["elements"] if el["type"] == "text"}
+    new = {el["id"]: max(1e-6, el["font_size"]) for el in out["elements"] if el["type"] == "text"}
+    total, pairs = 0.0, 0
+    ids = sorted(src, key=lambda i: -src[i])
+    for n, a in enumerate(ids):
+        for b in ids[n + 1:]:
+            if src[a] < src[b] * 1.15:
+                continue
+            need = 0.5 * math.log(src[a] / src[b])
+            total += max(0.0, need - math.log(new[a] / new[b]))
+            pairs += 1
+    return total / pairs if pairs else 0.0
+
+
+def inflation_penalty(source: dict, out: dict, allowed: float = 1.7) -> float:
+    """Penalize secondary text (and its pill/group) growing much more than the headline.
+
+    Scale is output/source font size; the largest source text is the reference.
+    """
+    src = {el["id"]: el["font_size"] for el in source["elements"] if el["type"] == "text"}
+    if len(src) < 2:
+        return 0.0
+    ref = max(src, key=src.get)
+    new = {el["id"]: el["font_size"] for el in out["elements"] if el["type"] == "text"}
+    ref_scale = new[ref] / src[ref]
+    excess = [max(0.0, math.log(new[i] / src[i] / ref_scale / allowed)) for i in src if i != ref]
+    # Art may out-grow the headline somewhat on tall/narrow canvases, but a
+    # logo should not dwarf the message (limit is looser than for text).
+    src_el = {el["id"]: el for el in source["elements"]}
+    for el in out["elements"]:
+        o = src_el[el["id"]]
+        if el["type"] == "image" and o["width"] > 0 and not is_background(o, source["canvas"]):
+            excess.append(max(0.0, math.log(el["width"] / o["width"] / ref_scale / 2.0)))
+    return sum(excess) / len(excess)
+
+
+def choppy_penalty(out: dict, min_chars: float = 14.0) -> float:
+    """Penalize copy wrapped into slivers (very few characters per line)."""
+    total = 0.0
+    for el in out["elements"]:
+        if el["type"] != "text":
+            continue
+        lines, _ = measure(el, el["font_size"], el["width"])
+        per_line = len(str(el.get("content", "")).strip()) / lines
+        if lines > 1 and per_line < min_chars:
+            total += math.log(min_chars / max(per_line, 1))
+    return total
+
+
+def group_area_penalty(source: dict, out: dict, allowed: float = 2.5) -> float:
+    """Penalize explicit groups (pills, badges) whose share of the canvas
+    grows far beyond their share in the source design."""
+    src_area = source["canvas"]["width"] * source["canvas"]["height"]
+    out_area = out["canvas"]["width"] * out["canvas"]["height"]
+    # Extreme aspect changes force pills to occupy more of the short side.
+    stretch = abs(math.log(out["canvas"]["width"] / out["canvas"]["height"]
+                           * source["canvas"]["height"] / source["canvas"]["width"]))
+    allowed *= math.exp(0.5 * stretch)
+    by_id = {el["id"]: el for el in out["elements"]}
+    excess = []
+    for u in build_units(source):
+        if u["kind"] != "rigid" or len(u["idx"]) < 2 or u["images_only"]:
+            continue
+        x0, y0, x1, y1 = u["bbox"]
+        a0, b0, a1, b1 = union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"])
+        before = (x1 - x0) * (y1 - y0) / src_area
+        after = (a1 - a0) * (b1 - b0) / out_area
+        if before > 0:
+            excess.append(max(0.0, math.log(after / before / allowed)))
+    return sum(excess) / len(excess) if excess else 0.0
+
+
 def score(source: dict, out: dict) -> float:
     q = metrics(source, out)
-    sizes = [max(1, t["font_size"]) for t in q["texts"]]
-    # Absolute legibility matters: preserving a tiny source font ratio should
-    # not beat readable supporting copy merely because a headline grew more.
-    readability = (0.6 * math.log(min(sizes) / 12)
-                   + 0.4 * sum(math.log(min(s, 48) / 12) for s in sizes) / len(sizes)) if sizes else 0
+    src_size = {el["id"]: el["font_size"] for el in source["elements"] if el["type"] == "text"}
+    new_size = {t["id"]: max(1, t["font_size"]) for t in q["texts"]}
+    readability = 0
+    if src_size:
+        ref = max(src_size, key=src_size.get)
+        ref_scale = new_size[ref] / src_size[ref]
+        canvas = math.sqrt(out["canvas"]["width"] * out["canvas"]["height"]
+                           / (source["canvas"]["width"] * source["canvas"]["height"]))
+        # The headline earns credit up to 2x its canvas-proportional size.
+        # Supporting copy earns credit only up to 1.3x its size in proportion
+        # to the headline (or a legible 16px floor); past that it merely
+        # inflates its pills and crowds a wide banner.
+        caps = {i: max(16, 1.3 * src_size[i] * ref_scale) for i in src_size}
+        caps[ref] = max(16, 2.0 * src_size[ref] * canvas)
+        sizes = [min(new_size[i], caps[i]) for i in src_size]
+        # Absolute legibility matters: preserving a tiny source font ratio should
+        # not beat readable supporting copy merely because a headline grew more.
+        readability = (0.6 * math.log(min(sizes) / 12)
+                       + 0.4 * sum(math.log(min(s, 96) / 12) for s in sizes) / len(sizes))
     src = {el["id"]: el for el in source["elements"]}
     images = [math.log(max(0.001, min(1.5, el["width"] / src[el["id"]]["width"])))
               for el in out["elements"] if el["type"] == "image" and src[el["id"]]["width"] > 0
               and not is_background(src[el["id"]], source["canvas"])
               and asset_info(el["asset_id"])["available"]]
     return (readability + (0.25 * sum(images) / len(images) if images else 0)
-            - 4 * q["text_overflows"] - 2 * q["overlap_severity"])
+            - 4 * q["text_overflows"] - 2 * q["overlap_severity"]
+            - 3 * hierarchy_penalty(source, out) - 2 * inflation_penalty(source, out) - 0.4 * choppy_penalty(out)
+            - 1.5 * group_area_penalty(source, out))

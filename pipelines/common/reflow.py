@@ -29,6 +29,10 @@ def _row(src, units, width, k, gamma, gap, image_scale=1.0):
             scales = [_font_size(src, e, k, gamma) / e["font_size"] for e in members if e["type"] == "text"]
             s = max(scales, default=k * (image_scale if u["images_only"] else 1.0))
             x0, y0, x1, y1 = u["bbox"]
+            if u["images_only"] and len(units) == 1 and x1 > x0:
+                # A lone image row may fill the width instead of blocking the
+                # shared text scale: tall, narrow canvases need big art, small type.
+                s = min(s, width / (x1 - x0))
             rigid[i] = ((x1 - x0) * s, (y1 - y0) * s, s)
     remaining = width - sum(v[0] for v in rigid.values()) - gap * (len(units) - 1)
     if remaining < 0 or (texts and remaining <= 0):
@@ -91,11 +95,14 @@ def _plan(src, units, rect, k, gamma, gap, mode, image_scale=1.0):
         rows.append((rh, placed))
         end = start
     rows.reverse()
-    y = Y + (H - costs[n]) / 2
+    # Spread leftover height between rows (bounded) rather than leaving one
+    # dead block; any remainder stays centred.
+    extra = min((H - costs[n]) / (len(rows) - 1), max(3 * gap, 0.04 * H)) if len(rows) > 1 else 0
+    y = Y + (H - costs[n] - extra * (len(rows) - 1)) / 2
     placements = []
     for rh, row in rows:
         placements.extend((kind, u, X + x, y + py, w, h, s) for kind, u, x, py, w, h, s in row)
-        y += rh + gap
+        y += rh + gap + extra
     return placements
 
 
