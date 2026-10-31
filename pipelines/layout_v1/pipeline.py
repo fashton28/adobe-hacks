@@ -13,9 +13,15 @@ import math
 from typing import Any
 
 from pipelines.anchored.pipeline import resize as anchored_resize
-from pipelines.common.geometry import overlap_area, aabb
-from pipelines.common.text import fit_text, measure, text_height
-from pipelines.common.units import build_units, copy_design, place_bg, place_decor, place_rigid
+from pipelines.common.geometry import aabb, overlap_area
+from pipelines.common.text import fit_text, measure
+from pipelines.common.units import (
+    build_units,
+    copy_design,
+    place_bg,
+    place_decor,
+    place_rigid,
+)
 from pipelines.common.validate import is_background, validate
 
 K_MIN = 0.02
@@ -184,9 +190,8 @@ def _score(src, out) -> float:
             weights.append(m["width"] * m["height"] + 1)
         elif o["type"] == "image" and not is_background(m, src["canvas"]) and m["width"]:
             img.append((min(1.5, max(0.01, o["width"] / m["width"])), m["width"] * m["height"]))
-        if o["type"] != "shape" or o.get("group_id"):
-            if not is_background(m, src["canvas"]):
-                boxes.append((o.get("group_id") or o["id"], aabb(o)))
+        if (o["type"] != "shape" or o.get("group_id")) and not is_background(m, src["canvas"]):
+            boxes.append((o.get("group_id") or o["id"], aabb(o)))
     text_term = 0.0
     if ratios:
         wmean = sum(w * math.log(r) for r, w in zip(ratios, weights)) / sum(weights)

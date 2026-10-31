@@ -93,9 +93,9 @@ def validate(source: dict, target: dict, out: dict) -> list[str]:
         x0, y0, x1, y1 = aabb(el)
         if x0 < -EPS or y0 < -EPS or x1 > W + EPS or y1 > H + EPS:
             problems.append(f"{el['id']}: off-canvas")
-        if el["type"] == "image" and not is_background(s, source["canvas"]) and s["height"] and s["width"] and el["height"]:
-            if abs((el["width"] / el["height"]) / (s["width"] / s["height"]) - 1) > RATIO_TOL:
-                problems.append(f"{el['id']}: image aspect ratio changed")
+        if (el["type"] == "image" and not is_background(s, source["canvas"]) and s["height"] and s["width"]
+                and el["height"] and abs((el["width"] / el["height"]) / (s["width"] / s["height"]) - 1) > RATIO_TOL):
+            problems.append(f"{el['id']}: image aspect ratio changed")
         if el["type"] == "text" and (el.get("content") != s.get("content") or el.get("font_family") != s.get("font_family")):
             problems.append(f"{el['id']}: content/font_family changed")
     # Explicit groups must share one geometry transform. Font fitting is

@@ -5,7 +5,7 @@ paint sizes and style runs. Pillow provides a conservative fallback when the
 renderer dependencies are absent. Neither path fetches fonts from the network.
 """
 
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 from PIL import ImageFont
@@ -20,7 +20,7 @@ _REF = 100.0
 _SAFETY = 1.02  # headroom for kerning / bold style-runs
 
 
-@lru_cache(maxsize=None)
+@cache
 def _font_path(family: str, bold: bool, italic: bool) -> str | None:
     base = family.replace(" ", "")
     suffix = ("Bold" if bold else "") + ("Italic" if italic else "") or "Regular"
@@ -32,7 +32,7 @@ def _font_path(family: str, bold: bool, italic: bool) -> str | None:
     return str(any_font[0]) if any_font else None
 
 
-@lru_cache(maxsize=None)
+@cache
 def _ref_font(path: str):
     return ImageFont.truetype(path, int(_REF))
 

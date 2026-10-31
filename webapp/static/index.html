@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chameleon Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23F0B242'/%3E%3Cstop offset='1' stop-color='%23DC3C32'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%232B1B2E'/%3E%3Ccircle cx='16' cy='18' r='9' fill='url(%23g)'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to results</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <span class="brand-name">Chameleon</span>
+        <span class="brand-sub">Layout adaptation viewer</span>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span class="health" id="health" data-state="pending">
+        <span class="health-dot" aria-hidden="true"></span>
+        <span class="health-label">Connecting</span>
+      </span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="Run settings">
+      <section class="panel" aria-labelledby="design-heading">
+        <h2 class="panel-title" id="design-heading"><span class="step">1</span>Design</h2>
+
+        <label class="field-label" for="sample-select">Sample task</label>
+        <div class="select-wrap">
+          <select id="sample-select">
+            <option value="">Loading samples...</option>
+          </select>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="file-input" accept="application/json,.json" class="visually-hidden">
+          <label for="file-input" class="dropzone-label" id="dropzone-label">
+            <svg class="dropzone-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span><strong>Drop a task JSON</strong> or <span class="link-like">browse</span></span>
+          </label>
+        </div>
+
+        <div class="design-card" id="design-card" hidden>
+          <div class="design-card-head">
+            <span class="design-card-title" id="design-title"></span>
+            <span class="tag" id="design-origin"></span>
+          </div>
+          <dl class="design-facts">
+            <div><dt>Canvas</dt><dd id="design-canvas"></dd></div>
+            <div><dt>Elements</dt><dd id="design-elements"></dd></div>
+            <div><dt>Level</dt><dd id="design-level"></dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="format-heading">
+        <h2 class="panel-title" id="format-heading"><span class="step">2</span>Target format</h2>
+        <div class="formats" id="formats" role="radiogroup" aria-labelledby="format-heading"></div>
+        <div class="custom-size" id="custom-size">
+          <label class="custom-radio">
+            <input type="radio" name="format" value="custom" id="format-custom">
+            <span>Custom</span>
+          </label>
+          <div class="custom-inputs">
+            <label class="visually-hidden" for="custom-w">Custom width in pixels</label>
+            <input type="number" id="custom-w" min="1" max="8192" step="1" placeholder="Width" inputmode="numeric">
+            <span class="times" aria-hidden="true">&times;</span>
+            <label class="visually-hidden" for="custom-h">Custom height in pixels</label>
+            <input type="number" id="custom-h" min="1" max="8192" step="1" placeholder="Height" inputmode="numeric">
+            <span class="unit" aria-hidden="true">px</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="pipeline-heading">
+        <h2 class="panel-title" id="pipeline-heading"><span class="step">3</span>Pipeline</h2>
+        <label class="visually-hidden" for="pipeline-select">Pipeline</label>
+        <div class="select-wrap">
+          <select id="pipeline-select"></select>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="run-btn" disabled>
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="btn-label">Run resize</span>
+        </button>
+        <button type="button" class="btn btn-secondary" id="compare-btn" disabled>Compare all formats</button>
+        <p class="hint">Tip: press <kbd>Ctrl</kbd>/<kbd>&#8984;</kbd> + <kbd>Enter</kbd> to run.</p>
+      </div>
+    </aside>
+
+    <main class="main" id="main" tabindex="-1">
+      <div class="view-switch" role="tablist" aria-label="View">
+        <button type="button" role="tab" id="tab-result" aria-controls="view-result" aria-selected="true">Result</button>
+        <button type="button" role="tab" id="tab-compare" aria-controls="view-compare" aria-selected="false" tabindex="-1">All formats <span class="tab-count" id="compare-count" hidden></span></button>
+      </div>
+
+      <div class="banner banner-error" id="error-banner" role="alert" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5v5.5M12 16.5v.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <div><strong id="error-title">Something went wrong</strong><p id="error-text"></p></div>
+        <button type="button" class="icon-btn" id="error-close" aria-label="Dismiss error">&times;</button>
+      </div>
+
+      <section id="view-result" role="tabpanel" aria-labelledby="tab-result">
+        <div class="empty" id="empty-state">
+          <div class="empty-art" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h1>Resize a design into any format</h1>
+          <p>Pick a sample or drop a task JSON, choose a target format, and run the engine.
+            Source and output are rendered by the official renderer.</p>
+        </div>
+
+        <div class="result" id="result" hidden>
+          <div class="summary">
+            <div class="summary-main">
+              <div class="summary-headline">
+                <span class="badge" id="validation-badge"></span>
+                <h1 class="summary-title" id="summary-title"></h1>
+              </div>
+              <span class="summary-sub" id="summary-sub"></span>
+            </div>
+            <div class="summary-actions">
+              <label class="toggle">
+                <input type="checkbox" id="boxes-toggle">
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span>Element boxes</span>
+              </label>
+              <button type="button" class="btn btn-ghost" id="download-json">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                JSON
+              </button>
+              <button type="button" class="btn btn-ghost" id="download-png">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                PNG
+              </button>
+            </div>
+          </div>
+
+          <div class="previews">
+            <figure class="preview" id="preview-source">
+              <figcaption>
+                <span class="preview-label">Source</span>
+                <span class="preview-dims" id="source-dims"></span>
+              </figcaption>
+              <button type="button" class="stage" id="source-stage" aria-label="Open source at native size">
+                <span class="frame" id="source-frame"><img id="source-img" alt="Rendered source design"><span class="overlay" id="source-overlay" aria-hidden="true"></span></span>
+              </button>
+            </figure>
+            <figure class="preview" id="preview-output">
+              <figcaption>
+                <span class="preview-label">Output</span>
+                <span class="preview-dims" id="output-dims"></span>
+              </figcaption>
+              <button type="button" class="stage" id="output-stage" aria-label="Open output at native size">
+                <span class="frame" id="output-frame"><img id="output-img" alt="Rendered resized design"><span class="overlay" id="output-overlay" aria-hidden="true"></span></span>
+              </button>
+            </figure>
+          </div>
+
+          <div class="issues" id="issues"></div>
+
+          <h2 class="section-title">Quality diagnostics</h2>
+          <div class="metrics" id="metrics"></div>
+
+          <h2 class="section-title">Elements</h2>
+          <div class="table-wrap">
+            <table class="elements" id="elements-table">
+              <thead>
+                <tr>
+                  <th scope="col">Id</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Source box</th>
+                  <th scope="col">Output box</th>
+                  <th scope="col" class="num">Scale</th>
+                  <th scope="col" class="num">Font size</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+        <div class="compare-head">
+          <div>
+            <h1 class="summary-title" id="compare-title">All formats</h1>
+            <span class="summary-sub" id="compare-sub">Run the current design against every catalogue format.</span>
+          </div>
+          <button type="button" class="btn btn-ghost" id="compare-cancel" hidden>Stop</button>
+        </div>
+        <div class="progress" id="compare-progress" hidden>
+          <div class="progress-bar"><span id="compare-bar"></span></div>
+          <span class="progress-label" id="compare-progress-label" aria-live="polite"></span>
+        </div>
+        <div class="empty empty-compact" id="compare-empty">
+          <p>Load a design and press <strong>Compare all formats</strong> to see every catalogue format side by side.</p>
+        </div>
+        <div class="compare-grid" id="compare-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="zoom" id="zoom" aria-labelledby="zoom-title">
+    <div class="zoom-head">
+      <h2 id="zoom-title"></h2>
+      <div class="zoom-levels" role="radiogroup" aria-label="Zoom level">
+        <label><input type="radio" name="zoom-level" value="fit"><span>Fit</span></label>
+        <label><input type="radio" name="zoom-level" value="1" checked><span>100%</span></label>
+        <label><input type="radio" name="zoom-level" value="2"><span>200%</span></label>
+      </div>
+      <label class="toggle toggle-dark">
+        <input type="checkbox" id="zoom-boxes">
+        <span class="toggle-track" aria-hidden="true"></span>
+        <span>Boxes</span>
+      </label>
+      <button type="button" class="icon-btn" id="zoom-close" aria-label="Close zoom view">&times;</button>
+    </div>
+    <div class="zoom-body" id="zoom-body">
+      <span class="frame" id="zoom-frame"><img id="zoom-img" alt=""><span class="overlay" id="zoom-overlay" aria-hidden="true"></span></span>
+    </div>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

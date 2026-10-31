@@ -13,11 +13,14 @@ From the repository root:
 
 ```text
 python -m unittest discover -s tests -v
-python -m scripts.run_matrix --pipelines adaptive --schema --variants --include-source --check-determinism --strict-quality --output-dir output/eval-public
-python -m scripts.run_matrix --input-dir tests/fixtures --pipelines adaptive --schema --render --strict-quality --output-dir output/eval-independent
-python -m scripts.run_matrix --pipelines anchored layout_v1 flow adaptive --schema --render --strict-quality --reference-pipelines anchored layout_v1 flow --output-dir output/eval-comparison
+python -m scripts.run_matrix --pipelines adaptive --schema --variants --include-source --check-determinism --strict-quality --output-dir output/backend/stress
+python -m scripts.run_matrix --input-dir tests/fixtures --pipelines adaptive --schema --render --strict-quality --check-determinism --include-source --output-dir output/backend/fixtures
+python -m scripts.run_matrix --pipelines adaptive --schema --render --strict-quality --check-determinism --output-dir output/backend/render
+python -m scripts.run_matrix --pipelines anchored layout_v1 flow adaptive --schema --render --strict-quality --reference-pipelines anchored layout_v1 flow --output-dir output/backend/comparison
 ```
 
+Targets come from the shared catalogue in `pipelines/common/formats.py`
+(`TARGETS`), which the web viewer also uses.
 The runner always adds a task's requested target when it is absent from the
 selected catalogue. `--targets leaderboard banner_wide instagram_portrait`
 narrows development runs. Reference pipelines remain in the report but do not
@@ -32,10 +35,21 @@ font sizes, failures, tiny-copy counts and median/p95 runtime per pipeline.
 The source/output JSONs are saved alongside it. `--render` calls the actual
 renderer directly and fails on renderer errors; it never accepts box previews.
 Render dimensions are checked without the renderer's usual 2048px cap.
-Absent assets remain in the JSON and warnings but paint transparently in the
-preview. Use `show_missing_assets=True` with `render_design_to_png()` for diagnostic
-placeholders. Missing artwork does not consume adaptive content rows or count
-as a visible collision. Mixed groups retain their shared transform.
+The renderer is the official, unmodified starter renderer that judges use.
+It paints an absent asset as a visible, opaque, labeled grey placeholder box and emits a warning; the element is never dropped.
+Contain fitting pastes RGBA art using its own alpha as the mask, so semi-transparent edges are slightly attenuated; `tests/test_assets.py` pins both behaviors.
+
+### Missing-asset policy
+
+Because the placeholder is visible in the scored PNG, a fully missing image unit is treated as small furniture rather than content (`pipelines/common/placeholders.py`):
+
+- it keeps its id, `asset_id` and aspect ratio, stays on-canvas and never takes space in content rows;
+- its size is its source size times the uniform canvas scale `min(W/Ws, H/Hs)`, so it shrinks on tiny targets;
+- it moves, as one rigid unit, to the free spot nearest its source anchor that clears every content unit by a small gap, trading drift against shrinking (down to a 6px floor);
+- if no free spot exists, the least-overlapping spot is used and the overlap is reported.
+
+`quality.metrics` counts missing units in collision checks (so `--strict-quality` fails if a placeholder covers copy) but excludes them from the source-arrangement shift.
+Mixed groups (some art present) keep their shared group transform.
 
 ## Acceptance
 
@@ -65,9 +79,43 @@ as a visible collision. Mixed groups retain their shared transform.
    `metrics.images` reports visible artwork dimensions after transparent padding
    and image fitting, making product/logo shrinkage easier to spot.
 
+## Current results (2026-10-30)
+
+All 41 unit tests pass (`python -m unittest discover -s tests -v`).
+Gated runs, adaptive pipeline, all with zero gated failures:
+
+| Run | Cases | Contract | Overflow | Overlap | Nondeterministic | Below 6px | Median ms | p95 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Public + variants + source canvas (`stress`) | 168 | 0 | 0 | 0 | 0 | 41 | 122 | 1781 |
+| Independent fixtures, real renderer | 30 | 0 | 0 | 0 | 0 | 0 | 53 | 127 |
+| Public samples, real renderer | 39 | 0 | 0 | 0 | 0 | 6 | 126 | 2099 |
+
+Minimum font size (px) per public sample and target, real renderer run:
+
+| Target | Size | Level 1 | Level 2 | Level 3 |
+| --- | --- | ---: | ---: | ---: |
+| instagram_post | 1080x1080 | 30.0 | 26.8 | 16.5 |
+| instagram_portrait | 1080x1350 | 54.9 | 33.5 | 12.0 |
+| story | 1080x1920 | 68.0 | 37.9 | 20.4 |
+| youtube_thumb | 1280x720 | 45.3 | 25.3 | 16.2 |
+| facebook_cover | 1640x624 | 58.1 | 32.4 | 19.5 |
+| twitter_header | 1500x500 | 53.1 | 29.6 | 17.3 |
+| linkedin_banner | 1584x396 | 56.1 | 27.9 | 16.4 |
+| pinterest_pin | 1000x1500 | 53.1 | 37.2 | 20.1 |
+| banner_wide | 1600x400 | 56.6 | 28.2 | 16.6 |
+| leaderboard | 728x90 | 25.8 | 10.5 | 5.9 |
+| skyscraper | 160x600 | 21.2 | 7.0 | 5.4 |
+| medium_rect | 300x250 | 10.8 | 7.2 | 4.8 |
+| a4_portrait | 794x1123 | 39.8 | 27.8 | 15.2 |
+
+The requested targets are Level 1 at 1080x1350, Level 2 at 1600x400 and Level 3 at 728x90.
+Level 3 at 728x90 keeps all copy at 5.9-10.2px (headline 10.2px, legal line 5.9px).
+Its binding constraint is the row of four pills: their source widths total 1310px and one shared scale drives every font, so even an empty canvas would cap pill labels near 8.3px.
+Level 3 at instagram_portrait reports 12px because the source legal line is 12px.
+
 ## Corpus and independence
 
-- `input/`: the three unchanged public samples, across eleven development
+- `input/`: the three unchanged public samples, across the thirteen catalogue
   formats, their original canvases and actual requested targets.
 - `--variants`: identifier renaming/no notes, longer ungrouped copy, and
   rotated groups. These expose brittle logic but are not independent designs.
@@ -101,5 +149,5 @@ docker run --rm --network none --mount "type=bind,source=$evalInput,target=/app/
 Use a new output folder each run so stale files cannot satisfy the check.
 Verify one artifact pair per task, target dimensions, contract/schema validity
 and actual text/asset rendering. No runtime network access or downloads are
-needed. Docker is unavailable in the current development environment, so the
-container check remains unverified. No official latency/memory limit is assumed.
+needed. The container check is owned by the Docker track and was not re-run as part of the backend pass.
+RULES.md sets no hard latency limit; quality is prioritized over speed.

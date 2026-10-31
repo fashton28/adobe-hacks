@@ -3,8 +3,8 @@
 import math
 import statistics
 
-from .geometry import aabb, overlap_area, union
 from .assets import asset_info, unavailable_unit
+from .geometry import aabb, overlap_area, union
 from .text import measure, text_height
 from .units import build_units
 from .validate import is_background
@@ -40,10 +40,15 @@ def metrics(source: dict, out: dict) -> dict:
                       "height_overflow": max(0, height - el["height"])})
     sizes = [t["font_size"] for t in texts]
     by_id = {el["id"]: el for el in out["elements"]}
+    # Missing-asset units are painted as opaque placeholders by the official
+    # renderer, so they count for collisions, but not for arrangement shift
+    # (they are deliberately relocated to free space).
     boxes = [(u, union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"]))
-             for u in build_units(source) if u["kind"] not in ("bg", "decor") and not unavailable_unit(source, u)]
+             for u in build_units(source) if u["kind"] not in ("bg", "decor")]
     shifts = []
     for u, box in boxes:
+        if unavailable_unit(source, u):
+            continue
         original = u["bbox"]
         shifts.append(math.hypot(
             (box[0] + box[2]) / (2 * out["canvas"]["width"]) - (original[0] + original[2]) / (2 * source["canvas"]["width"]),

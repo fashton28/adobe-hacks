@@ -7,7 +7,14 @@ always structurally valid; used as the fallback for smarter pipelines.
 
 from typing import Any
 
-from pipelines.common.units import build_units, clamp_unit, copy_design, place_bg, place_decor, place_rigid
+from pipelines.common.units import (
+    build_units,
+    clamp_unit,
+    copy_design,
+    place_bg,
+    place_decor,
+    place_rigid,
+)
 
 
 def resize(source: dict[str, Any], target_canvas: dict[str, Any]) -> dict[str, Any]:

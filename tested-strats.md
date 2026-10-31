@@ -1,5 +1,31 @@
 # Tested strategies
 
+## Backend finalization on the official renderer (2026-10-30)
+
+The renderer is back to the official starter code, so a missing asset now paints a visible labeled placeholder and contain-fit pastes with an alpha mask.
+The asset tests were rewritten to pin that official behavior (warning, opaque placeholder, element retained, no crash).
+No code in `pipelines/`, `scripts/` or `tests/` depends on the removed `show_missing_assets` option any more.
+
+Missing-asset policy: the placeholder is treated as small furniture.
+It stays out of content rows, keeps its ratio and the uniform canvas scale, and `pipelines/common/placeholders.py` moves it to the free spot nearest its source anchor that clears all content (shrinking to a 6px floor if needed).
+Quality metrics now count it in collision checks; previously it was excluded.
+At the source canvas and story sizes the placeholder used to cover the Level 3 legal line; it now sits clear of copy.
+
+Other changes:
+- `pipelines/api.py` exposes `run(source, target_canvas, pipeline=None)` for the web viewer, with a contract test.
+- `scripts/run_matrix.py` uses the shared `pipelines/common/formats.py` catalogue (13 targets, adding LinkedIn banner and Pinterest pin).
+- Texts sharing a row try an area-proportional width split as well as the sqrt split; medium_rect Level 3 minimum rises from 4.6px to 4.8px, at roughly 35% more search time on Level 3 (about 1.5s worst case).
+- Image-only rows grow shorter art (logo beside product) up to 2x within spare width; the Level 2 728x90 logo roughly doubles in painted width with unchanged fonts.
+- A narrower 0.15 image column was tried for 728x90: headline 10.2px to 11.9px, but the legal line wrapped into a 7-line corner sliver and the logo became illegible, so it was reverted.
+- Rewarding headline size directly in `quality.score` (weights 0.3-1.0) barely changed selections; the limit is the candidate space, not the ranking.
+- Lint (ruff with the user's global config) is clean across `pipelines/`, `scripts/` and `tests/`.
+
+Verification: 41 tests pass.
+Strict stress matrix (168 cases: variants, source canvas, schema, determinism) has zero gated failures, as do the independent fixtures with the real renderer (30 cases) and the public samples with the real renderer (39 cases).
+`python -m engine.main` writes three valid JSON/PNG pairs at exact target sizes.
+The minimum-font table per sample and target is in `EVALUATION.md`.
+Level 3 at 728x90 remains 5.9-10.2px.
+
 ## Visual-review scoring pass (2026-10-16)
 
 Reviewed real renders of all samples x 11 targets. Fixes in `quality.score`:

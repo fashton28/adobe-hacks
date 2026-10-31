@@ -4,9 +4,9 @@ import contextlib
 import copy
 import io
 import json
+import shutil
 import subprocess
 import sys
-import shutil
 import unittest
 import uuid
 from pathlib import Path
@@ -15,9 +15,10 @@ from unittest.mock import patch
 from pipelines import get_pipeline
 from pipelines.adaptive.pipeline import search
 from pipelines.common.quality import metrics
-from pipelines.common.text import measure, _measure_uncached
+from pipelines.common.text import _measure_uncached, measure
 from pipelines.common.validate import validate
-from scripts.run_matrix import main as matrix_main, variants
+from scripts.run_matrix import main as matrix_main
+from scripts.run_matrix import variants
 
 ROOT = Path(__file__).resolve().parents[1]
 

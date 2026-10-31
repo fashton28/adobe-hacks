@@ -10,12 +10,19 @@ import copy
 import math
 
 from pipelines.anchored.pipeline import resize as anchored_resize
-from pipelines.common.quality import metrics, score
-from pipelines.common.geometry import union
 from pipelines.common.assets import unavailable_unit
+from pipelines.common.geometry import union
+from pipelines.common.placeholders import place_missing_assets
+from pipelines.common.quality import metrics, score
 from pipelines.common.reflow import candidates
 from pipelines.common.text import fit_text
-from pipelines.common.units import build_units, copy_design, place_bg, place_decor, place_rigid
+from pipelines.common.units import (
+    build_units,
+    copy_design,
+    place_bg,
+    place_decor,
+    place_rigid,
+)
 from pipelines.common.validate import validate, validate_input
 
 
@@ -85,7 +92,7 @@ def search(source: dict, target_canvas: dict) -> tuple[dict, dict]:
     intent_weight = 3 * math.exp(-2 * abs(math.log(target_ratio / source_ratio)))
     for name, candidate in _candidates(source, target_canvas):
         evaluated += 1
-        out = _fit_labels(candidate)
+        out = place_missing_assets(_fit_labels(candidate), source)
         if validate(source, target_canvas, out):
             rejected += 1
             continue

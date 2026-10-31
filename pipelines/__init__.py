@@ -9,7 +9,7 @@ Select one with the CHAMELEON_PIPELINE env var; otherwise DEFAULT is used.
 
 import importlib
 import os
-from typing import Callable
+from collections.abc import Callable
 
 PIPELINES = {
     "stretch": "pipelines.baseline_stretch.pipeline",

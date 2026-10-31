@@ -4,22 +4,23 @@ Run with: python -m unittest discover -s tests -v
 """
 
 import copy
-from contextlib import contextmanager
 import json
 import math
-import subprocess
 import shutil
+import subprocess
 import sys
 import unittest
-from unittest.mock import patch
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from pipelines import get_pipeline
 from pipelines.common.quality import metrics
 from pipelines.common.text import fit_text, measure
 from pipelines.common.validate import is_background, validate
-from scripts.run_matrix import TARGETS, main as matrix_main, variants
+from scripts.run_matrix import TARGETS, variants
+from scripts.run_matrix import main as matrix_main
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -220,6 +221,7 @@ class RendererTests(unittest.TestCase):
 
     def test_measured_wrap_matches_converter_including_spacing_and_runs(self):
         import skia
+
         from renderer.converter.convert import convert_chameleon_to_crello
         for width in (70, 150, 500):
             el = fixture()["elements"][2]
@@ -257,6 +259,7 @@ class RendererTests(unittest.TestCase):
 
     def test_real_render_and_missing_asset_warning(self):
         from PIL import Image
+
         from renderer.converter.convert import render_design_to_png
         task = samples()[2]
         out = get_pipeline("flow")(task["source"], task["target_canvas"])

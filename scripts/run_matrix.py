@@ -6,8 +6,8 @@ Reports are development proxies, not official challenge scores.
 
 import argparse
 import copy
-import html
 import hashlib
+import html
 import importlib.metadata
 import importlib.util
 import json
@@ -17,15 +17,10 @@ import time
 from pathlib import Path
 
 from pipelines import PIPELINES, get_pipeline
+from pipelines.common.formats import TARGETS
 from pipelines.common.quality import metrics, score
 from pipelines.common.validate import validate
 
-TARGETS = {
-    "instagram_post": (1080, 1080), "instagram_portrait": (1080, 1350), "story": (1080, 1920),
-    "youtube_thumb": (1280, 720), "facebook_cover": (1640, 624), "twitter_header": (1500, 500),
-    "banner_wide": (1600, 400), "leaderboard": (728, 90), "skyscraper": (160, 600),
-    "medium_rect": (300, 250), "a4_portrait": (794, 1123),
-}
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -82,13 +77,14 @@ def write_html(outdir, records, sources):
         return html.escape(str(value), quote=True)
 
     parts = ["<!doctype html><html><meta charset='utf-8'><title>Pipeline comparison</title>",
-             "<style>body{font:15px system-ui;margin:24px;background:#f5f5f5}"
-             "section{margin:24px 0}.cases{display:flex;flex-wrap:wrap;gap:16px}"
-             "article{background:white;padding:12px;width:340px}"
-             "img{max-width:100%;max-height:300px;object-fit:contain}"
-             "pre{white-space:pre-wrap}.bad{color:#a00}</style>",
-             "<h1>Pipeline comparison</h1><p>Local proxies; not official scores. "
-             "Click a PNG to inspect native resolution. Missing-asset warnings are retained.</p>"]
+             ("<style>body{font:15px system-ui;margin:24px;background:#f5f5f5}"
+              "section{margin:24px 0}.cases{display:flex;flex-wrap:wrap;gap:16px}"
+              "article{background:white;padding:12px;width:340px}"
+              "img{max-width:100%;max-height:300px;object-fit:contain}"
+              "pre{white-space:pre-wrap}.bad{color:#a00}</style>"),
+             ("<h1>Pipeline comparison</h1><p>Local proxies; not official scores. "
+              "Click a PNG to inspect native resolution. Missing assets render as the "
+              "official placeholder box and are listed as warnings.</p>")]
     keys = list(dict.fromkeys((r["source"], r["target"]) for r in records))
     for source, target in keys:
         parts.append(f"<section><h2>{esc(source)} / {esc(target)}</h2><div class='cases'>")
@@ -224,7 +220,7 @@ def main(argv=None) -> int:
                                 r["render_size"] = list(png.size)
                             if r["render_size"] != [w, h]:
                                 r["problems"].append("render dimensions differ from target")
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - one broken case must not abort the report
                         r["elapsed_ms"] = (time.perf_counter() - started) * 1000
                         r["problems"].append(f"{type(exc).__name__}: {exc}")
                     finally:

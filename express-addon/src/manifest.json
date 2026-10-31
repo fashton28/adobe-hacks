@@ -1,0 +1,22 @@
+{
+    "testId": "bf94a8f8-e25d-4eab-8c18-615126b1421e",
+    "name": "CHAMELEON",
+    "version": "1.0.0",
+    "manifestVersion": 2,
+    "requirements": {
+        "apps": [
+            {
+                "name": "Express",
+                "apiVersion": 1,
+                "supportedDeviceClass": ["desktop"]
+            }
+        ]
+    },
+    "entryPoints": [
+        {
+            "type": "panel",
+            "id": "panel1",
+            "main": "index.html"
+        }
+    ]
+}
