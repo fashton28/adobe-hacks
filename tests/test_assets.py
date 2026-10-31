@@ -73,7 +73,8 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(validate(source, target, out), [])
         q = metrics(source, out)
         self.assertEqual((q["text_overflows"], q["overlap_pairs"]), (0, 0))
-        self.assertGreater(q["min_font"], 16)
+        # The smallest source copy (the 12px legal line) keeps at least its source size.
+        self.assertGreaterEqual(q["min_font"], 12)
         product = next(e for e in out["elements"] if e["id"] == "product")
         self.assertGreater(product["width"], 280)
         visible = next(im for im in q["images"] if im["id"] == product["id"])

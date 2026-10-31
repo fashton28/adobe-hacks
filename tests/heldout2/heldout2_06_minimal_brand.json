@@ -1,0 +1,83 @@
+{
+  "task_id": "heldout2_06",
+  "difficulty": "level_2_core",
+  "difficulty_label": "Level 2 - Core",
+  "notes": "Minimal brand card (1080x1080) to Medium Rectangle Ad 300x250 (tiny). Stresses sparse layouts: only a centered logo, a thin gold rule, an italic tagline and a letter-spaced URL with large intentional whitespace. The engine must preserve the airy composition rather than inflate or crowd elements, and keep the small URL legible after a 3.6x downscale.",
+  "source": {
+    "canvas": {
+      "width": 1080,
+      "height": 1080
+    },
+    "elements": [
+      {
+        "id": "bg",
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 1080,
+        "z_index": 0,
+        "asset_id": "solstice_bg_gradient.png",
+        "fit": "cover"
+      },
+      {
+        "id": "logo",
+        "type": "image",
+        "x": 340,
+        "y": 400,
+        "width": 400,
+        "height": 134,
+        "z_index": 2,
+        "asset_id": "solstice_logo_lockup.png",
+        "fit": "contain"
+      },
+      {
+        "id": "rule",
+        "type": "shape",
+        "x": 510,
+        "y": 576,
+        "width": 60,
+        "height": 2,
+        "z_index": 2,
+        "shape_type": "line",
+        "fill_color": "rgba(243,182,63,1)"
+      },
+      {
+        "id": "tagline",
+        "type": "text",
+        "x": 240,
+        "y": 600,
+        "width": 600,
+        "height": 44,
+        "z_index": 2,
+        "content": "Chase the Light",
+        "font_family": "Solstice Serif",
+        "font_size": 30,
+        "font_weight": "regular",
+        "color": "rgba(255,255,255,0.75)",
+        "text_align": "center",
+        "font_style": "italic"
+      },
+      {
+        "id": "url",
+        "type": "text",
+        "x": 340,
+        "y": 1000,
+        "width": 400,
+        "height": 26,
+        "z_index": 2,
+        "content": "SOLSTICE.COM",
+        "font_family": "Solstice Sans",
+        "font_size": 18,
+        "font_weight": "regular",
+        "color": "rgba(255,255,255,0.45)",
+        "text_align": "center",
+        "letter_spacing": 5
+      }
+    ]
+  },
+  "target_canvas": {
+    "width": 300,
+    "height": 250
+  }
+}

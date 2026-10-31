@@ -1,0 +1,203 @@
+{
+  "task_id": "heldout2_02",
+  "difficulty": "level_3_advanced",
+  "difficulty_label": "Level 3 - Advanced",
+  "notes": "Sale banner (1500x500, X header) to Wide Skyscraper Ad 160x600 (tiny and very tall). Stresses a giant percentage headline with a colored style run, a strikethrough price pair (old price text grouped with a thin line shape that must stay over it) next to the new price, a large product image with a translucent sun disc behind it, and a horizontal-to-vertical restack at a 9x narrower width.",
+  "source": {
+    "canvas": {
+      "width": 1500,
+      "height": 500
+    },
+    "elements": [
+      {
+        "id": "bg",
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "width": 1500,
+        "height": 500,
+        "z_index": 0,
+        "asset_id": "solstice_bg_gradient.png",
+        "fit": "cover"
+      },
+      {
+        "id": "sun_disc",
+        "type": "shape",
+        "x": 1070,
+        "y": 60,
+        "width": 360,
+        "height": 360,
+        "z_index": 1,
+        "shape_type": "ellipse",
+        "fill_color": "rgba(243,182,63,1)",
+        "opacity": 0.22
+      },
+      {
+        "id": "bottle",
+        "type": "image",
+        "x": 1030,
+        "y": 30,
+        "width": 440,
+        "height": 440,
+        "z_index": 3,
+        "asset_id": "solstice_bottle.png",
+        "fit": "contain"
+      },
+      {
+        "id": "logo",
+        "type": "image",
+        "x": 70,
+        "y": 44,
+        "width": 210,
+        "height": 70,
+        "z_index": 5,
+        "asset_id": "solstice_logo_lockup.png",
+        "fit": "contain"
+      },
+      {
+        "id": "eyebrow",
+        "type": "text",
+        "x": 70,
+        "y": 140,
+        "width": 600,
+        "height": 34,
+        "z_index": 5,
+        "content": "END OF SEASON SALE",
+        "font_family": "Solstice Sans",
+        "font_size": 24,
+        "font_weight": "bold",
+        "color": "rgba(243,182,63,1)",
+        "text_align": "left",
+        "letter_spacing": 4
+      },
+      {
+        "id": "percent",
+        "type": "text",
+        "x": 70,
+        "y": 180,
+        "width": 640,
+        "height": 150,
+        "z_index": 5,
+        "content": "40% OFF",
+        "font_family": "Solstice Serif",
+        "font_size": 124,
+        "font_weight": "bold",
+        "color": "rgba(250,243,232,1)",
+        "text_align": "left",
+        "style_runs": [
+          {
+            "start": 0,
+            "end": 3,
+            "color": "rgba(232,106,58,1)"
+          }
+        ]
+      },
+      {
+        "id": "old_price",
+        "type": "text",
+        "x": 720,
+        "y": 200,
+        "width": 200,
+        "height": 50,
+        "z_index": 5,
+        "content": "$48.00",
+        "font_family": "Solstice Sans",
+        "font_size": 40,
+        "font_weight": "regular",
+        "color": "rgba(255,255,255,0.6)",
+        "text_align": "left",
+        "group_id": "old_price"
+      },
+      {
+        "id": "old_price_strike",
+        "type": "shape",
+        "x": 718,
+        "y": 224,
+        "width": 128,
+        "height": 4,
+        "z_index": 6,
+        "shape_type": "line",
+        "fill_color": "rgba(255,255,255,0.85)",
+        "group_id": "old_price"
+      },
+      {
+        "id": "new_price",
+        "type": "text",
+        "x": 720,
+        "y": 252,
+        "width": 280,
+        "height": 80,
+        "z_index": 5,
+        "content": "$28.80",
+        "font_family": "Solstice Sans",
+        "font_size": 64,
+        "font_weight": "bold",
+        "color": "rgba(243,182,63,1)",
+        "text_align": "left"
+      },
+      {
+        "id": "price_caption",
+        "type": "text",
+        "x": 720,
+        "y": 334,
+        "width": 300,
+        "height": 30,
+        "z_index": 5,
+        "content": "per 12-pack, all flavors",
+        "font_family": "Solstice Sans",
+        "font_size": 22,
+        "font_weight": "regular",
+        "color": "rgba(255,255,255,0.8)",
+        "text_align": "left"
+      },
+      {
+        "id": "cta_bg",
+        "type": "shape",
+        "x": 70,
+        "y": 384,
+        "width": 260,
+        "height": 64,
+        "z_index": 4,
+        "shape_type": "rectangle",
+        "fill_color": "rgba(232,106,58,1)",
+        "corner_radius": 32,
+        "group_id": "cta"
+      },
+      {
+        "id": "cta_label",
+        "type": "text",
+        "x": 70,
+        "y": 400,
+        "width": 260,
+        "height": 32,
+        "z_index": 5,
+        "content": "Shop Now",
+        "font_family": "Solstice Sans",
+        "font_size": 24,
+        "font_weight": "bold",
+        "color": "rgba(255,255,255,1)",
+        "text_align": "center",
+        "group_id": "cta"
+      },
+      {
+        "id": "legal",
+        "type": "text",
+        "x": 360,
+        "y": 404,
+        "width": 560,
+        "height": 26,
+        "z_index": 5,
+        "content": "Ends September 30. While supplies last. Online only.",
+        "font_family": "Solstice Sans",
+        "font_size": 16,
+        "font_weight": "regular",
+        "color": "rgba(255,255,255,0.55)",
+        "text_align": "left"
+      }
+    ]
+  },
+  "target_canvas": {
+    "width": 160,
+    "height": 600
+  }
+}

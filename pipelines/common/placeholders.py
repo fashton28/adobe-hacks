@@ -31,7 +31,7 @@ SHRINK_WEIGHT = 0.25
 
 def missing_units(source: dict) -> list[dict]:
     return [u for u in build_units(source)
-            if u["kind"] not in ("bg", "decor") and unavailable_unit(source, u)]
+            if u["kind"] not in ("bg", "decor", "panel") and unavailable_unit(source, u)]
 
 
 def _spots(W, H, bw, bh, margin, anchor):
@@ -95,7 +95,7 @@ def place_missing_assets(out: dict, source: dict) -> dict:
     by_id = {el["id"]: el for el in out["elements"]}
     obstacles = [union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"])
                  for u in build_units(source)
-                 if u["kind"] not in ("bg", "decor") and not set(u["idx"]) & missing_idx]
+                 if u["kind"] not in ("bg", "decor", "panel") and not set(u["idx"]) & missing_idx]
     W, H = out["canvas"]["width"], out["canvas"]["height"]
     Ws, Hs = source["canvas"]["width"], source["canvas"]["height"]
     base = min(W / Ws, H / Hs)

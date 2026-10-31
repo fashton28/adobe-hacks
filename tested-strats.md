@@ -1,5 +1,43 @@
 # Tested strategies
 
+## Engine round 2: canvas fill, painted type, columns and sets (2026-10-30)
+
+Round 1 left four failure classes, all fixed with geometric rules that read no ids or names.
+
+Backdrops and frames:
+- Any ungrouped, unrotated shape covering at least 85% of the source canvas (solid field, paper sheet, translucent scrim) is now a backdrop and stretches to the full target; cover images keep the old rule.
+- Edge bands stretch along their edge, and an opaque inset sheet holding the copy maps to the matching target region with the layout inside it.
+- A translucent shape tightly wrapping one content unit (a glow behind a product) follows that unit; tinted divider lines stay structural.
+- New metrics compare backdrop coverage and empty canvas with the source, and `--strict-quality` fails a lost backdrop or a mostly empty canvas.
+  On round-1 output the metric reports 24%, 16% and 38% backdrop coverage for the three held-out designs that floated a box in a blank canvas.
+
+Painted type:
+- Font sizes are integers (floor, at least 1), the size cr-renderer paints, so converter wrapping and painting agree.
+- Measurement is token based and linear in words, models letter spacing per style span like cr-renderer, and is checked against the converter output.
+- Text boxes hug their wrapped copy (`tight_width`, verified to keep the converter's wrapping identical), and layout uses painted bounds, so transparent art padding and empty text-box width no longer create dead space.
+- The odd letter gaps (`SummerLine`, `drin k`) are renderer behavior at tiny sizes: on Linux, FreeType hinting at 7px gives Solstice Sans Bold a 1px space and 6px `u` (linear: 1.48px and 4.72px); on macOS, fractional advances are snapped to whole pixels.
+  The engine cannot change hinting; it now avoids sub-8px type where the design allows.
+
+Layout:
+- Column flow (the transpose of the row DP) for wide targets: Level 2 at 1600x400 now reads badge and logo, product, then a headline column (82px, was 74px) without a dead gap.
+- Splits space copy and art evenly; rows sit near their source heights (isotonic regression) with bounded gaps on extreme shapes.
+- Repeated units (cards, pills) form a set laid out as an even grid; three products are one row or one column, never 2 + 1, and share one shrink factor.
+- A lone unit shrinks to fit its row or column instead of blocking the shared type scale; footers use the body's type scale, so a footer can no longer outgrow the copy (held-out accented copy: one footer line instead of four).
+- Score changes: headline prominence, hierarchy kept to 75% of the source ratio, steep penalty below 8px, art size including shape art, new side-by-side copy pairs and content-centroid drift; source-arrangement weight 3 to 2.
+
+Tried and changed along the way:
+- Spacing row items evenly (`space-evenly`) put large gaps between copy and art; packing them into a centred cluster reads better.
+- Mapping rows to their global source heights inside split columns made banners diagonal (logo top-left, copy bottom-right); columns now use their own extent.
+- Sliding art whose transparent padding crossed the canvas edge created overlaps; shrinking it about its centre does not.
+
+Platform parity: Skia uses hinted integer advances on Linux and fractional ones on macOS, so layouts can differ between the venv and Docker even though each matches its own renderer.
+Final judgments came from container renders, including an in-container run of the evaluation matrix (command in `EVALUATION.md`).
+
+Performance: candidates measure through cached per-size tables and precomputed text keys; in the container under Rosetta the samples take 0.27s, 0.45s and 1.95s per task including rendering (round 1: 0.20s, 0.32s, 2.97s), and the slowest held-out task drops from 5.10s to 1.39s.
+
+Verification: 56 unit tests, lint, the strict stress matrix (168 cases), fixtures (30), held-out (84) and public samples (39) with the real renderer all pass with zero gated failures; the public samples (39) and held-out (78) also pass inside the container.
+Minimum font tables before and after are in `EVALUATION.md`; several minimums are lower because supporting copy no longer inflates toward the headline.
+
 ## Backend finalization on the official renderer (2026-10-30)
 
 The renderer is back to the official starter code, so a missing asset now paints a visible labeled placeholder and contain-fit pastes with an alpha mask.
@@ -177,7 +215,7 @@ Python 3.11 (matches Docker), real renderer (`renderer/converter`). Docker itsel
 
 ## How "evaluation" was done so far
 - **Structural checks** (`pipelines/common/validate.py`): same ids, nothing off-canvas, foreground image ratio within ~5%, content/font_family unchanged, finite values. All three samples pass for `layout_v1`.
-- **Proxy score** (`layout_v1._score`): our own heuristic — keeps font/image sizes close to source, penalises overlaps. **Not the official rubric** (weights unknown).
+- **Proxy score** (`layout_v1._score`): our own heuristic - keeps font/image sizes close to source, penalises overlaps. **Not the official rubric** (weights unknown).
 - **Visual inspection** of the rendered PNGs by eye. No source-vs-output side-by-side yet.
 - **Extra sweep** (`python -m scripts.run_matrix`): 3 samples x 11 invented common sizes x 3 pipelines. `layout_v1` scored higher than `anchored` in 32 of 33 combos (one near-tie: Level 3 → Instagram post, -0.31 vs -0.34) with no structural problems. Proxy scores only; these PNGs were not reviewed.
 

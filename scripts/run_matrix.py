@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pipelines import PIPELINES, get_pipeline
 from pipelines.common.formats import TARGETS
-from pipelines.common.quality import metrics, score
+from pipelines.common.quality import BACKDROP_SLACK, EMPTY_GROWTH, metrics, score
 from pipelines.common.validate import validate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +37,9 @@ def summarize(records):
             "quality_failures": sum(bool(r.get("quality_problems")) for r in rows),
             "overflow_cases": sum(r["metrics"]["text_overflows"] > 0 for r in measured),
             "overlap_cases": sum(r["metrics"]["overlap_pairs"] > 0 for r in measured),
+            "backdrop_cases": sum(r["metrics"]["backdrop_shortfall"] > BACKDROP_SLACK for r in measured),
+            "empty_canvas_cases": sum(r["metrics"]["empty_output"] - r["metrics"]["empty_source"] > EMPTY_GROWTH
+                                      for r in measured),
             "below_6px": sum(r["metrics"]["below_6px"] for r in measured),
             "below_10px": sum(r["metrics"]["below_10px"] for r in measured),
             "worst_min_font": min((r["metrics"]["min_font"] for r in text_rows), default=None),
@@ -100,7 +103,9 @@ def write_html(outdir, records, sources):
             parts.append(f"<p>Score {r.get('score', 0):.2f}; {r['elapsed_ms']:.0f} ms<br>"
                          f"Minimum font {q.get('min_font', 0):.1f}px; below 6px: {q.get('below_6px', 0)}<br>"
                          f"Text overflows: {q.get('text_overflows', 0)}; overlaps: {q.get('overlap_pairs', 0)}</p>")
-            parts.append(f"<p>Source arrangement shift: {q.get('layout_shift', 0):.3f}</p>")
+            parts.append(f"<p>Source arrangement shift: {q.get('layout_shift', 0):.3f}<br>"
+                         f"Backdrop coverage: {q.get('backdrop_coverage') if q.get('backdrop_coverage') is None else format(q['backdrop_coverage'], '.0%')}; "
+                         f"empty canvas: {q.get('empty_output', 0):.0%} (source {q.get('empty_source', 0):.0%})</p>")
             if r["problems"] or r.get("quality_problems"):
                 parts.append(f"<pre class='bad'>{esc('; '.join(r['problems'] + r.get('quality_problems', [])))}</pre>")
             if r.get("search"):
@@ -125,7 +130,8 @@ def main(argv=None) -> int:
     parser.add_argument("--variants", action="store_true")
     parser.add_argument("--include-source", action="store_true", help="Also test the original canvas")
     parser.add_argument("--check-determinism", action="store_true")
-    parser.add_argument("--strict-quality", action="store_true", help="Fail for text overflow or unrelated unit overlap")
+    parser.add_argument("--strict-quality", action="store_true",
+                        help="Fail for text overflow, unrelated unit overlap, a lost backdrop or a mostly empty canvas")
     parser.add_argument("--schema", action="store_true", help="Validate the supplied JSON schema (requirements-dev.txt)")
     parser.add_argument("--min-font", type=float, default=0, help="Optional readability gate in pixels; not an official threshold")
     parser.add_argument("--reference-pipelines", nargs="*", choices=sorted(PIPELINES), default=["stretch"],
@@ -207,6 +213,12 @@ def main(argv=None) -> int:
                                 r["quality_problems"].append("text overflow")
                             if q["overlap_pairs"]:
                                 r["quality_problems"].append("unrelated unit overlap")
+                            if q["backdrop_shortfall"] > BACKDROP_SLACK:
+                                r["quality_problems"].append(
+                                    f"backdrop covers {q['backdrop_coverage']:.0%} of the canvas")
+                            if q["empty_output"] - q["empty_source"] > EMPTY_GROWTH:
+                                r["quality_problems"].append(
+                                    f"empty canvas {q['empty_output']:.0%} vs {q['empty_source']:.0%} in source")
                         if q["texts"] and q["min_font"] < args.min_font:
                             r["quality_problems"].append(f"font below {args.min_font:g}px")
                         stem = f"{tag}_{tname}_{name}"

@@ -57,7 +57,7 @@ Run these inside `express-addon/`.
 | `npm test` | Unit tests (`node --test`), no browser needed. |
 | `npm run lint` | ESLint. |
 | `npm run check` | Lint, test and build. |
-| `npm run package` | Adobe CLI packaging for distribution (not needed for local testing). |
+| `npm run package` | Production build (`NODE_ENV=production`, minified, Lit and Spectrum production builds) into `dist/`, zipped to `dist.zip` (not needed for local testing). |
 
 ## Load the add-on in Adobe Express (step by step)
 
@@ -68,7 +68,7 @@ UI labels come from the Adobe docs and CLI README cited below; Adobe occasionall
    ```sh
    .venv/bin/python -m webapp
    ```
-   It prints `CHAMELEON viewer running at http://127.0.0.1:8765`.
+   It prints `CHAMELEON viewer running at http://localhost:8765` and listens on both `127.0.0.1` and `::1`.
    Check it with `curl http://localhost:8765/api/health`, which should print `{"ok": true}`.
 2. In a second terminal, install and build the add-on:
    ```sh
@@ -119,8 +119,8 @@ Code changes rebuild and reload in Express automatically while `npm run start` i
   Chrome 142 and later ask for permission before a public site reaches `localhost`.
   If you dismissed the prompt, re-enable it via the site settings icon in Chrome's address bar for `new.express.adobe.com`.
 - **`localhost` vs `127.0.0.1`.**
-  The backend binds `127.0.0.1` by default.
-  If your machine resolves `localhost` only to IPv6 `::1` and the panel cannot connect, set the Backend URL to `http://127.0.0.1:8765`.
+  By default the backend listens on both loopback addresses, `127.0.0.1` and `::1`, so `http://localhost:8765` works whichever one the browser resolves `localhost` to.
+  If you start it with an explicit `--host`, use a Backend URL that matches that address.
 - **Publishing.**
   This add-on is meant for local development and demos.
   A published add-on could not assume a backend on the user's machine; it would need the backend hosted on `https`.
@@ -137,6 +137,19 @@ open http://localhost:8798/index.html
 
 Narrow the window to about 320 px to match the Express panel width.
 
+## Production build and dependency audit
+
+`npm run package` is the production build.
+It compiles with webpack in production mode, which resolves the production (non-`development`) builds of Lit and Spectrum Web Components, so the panel logs no dev-mode warnings, and webpack itself reports no warnings.
+The main bundle is about 670 KiB minified, most of it the Spectrum Express theme CSS.
+Only the Express theme fragments are imported, because `<sp-theme system="express">` never reads the default Spectrum ones.
+`webpack.config.cjs` sets a 768 KiB production size budget that fails the build if the bundle grows past it, instead of webpack's generic 244 KiB hint that no Spectrum panel can meet.
+
+`npm audit --omit=dev` reports 0 vulnerabilities: nothing that ships in the panel bundle is affected.
+Patched versions of the Adobe CLI's vulnerable transitive dependencies (`express`, `body-parser`, `path-to-regexp`, `qs`, `ws`, `axios`, `tmp`, `adm-zip`) are forced with `overrides` in `package.json`; all are within the same release line as the versions the CLI pins.
+The remaining finding (checked on 2026-10-30) is a moderate `minimatch` advisory reached only through ESLint and the Adobe CLI's `@oclif/core`, `glob` and `jake`.
+These are developer tools that run on your machine against your own files, and `npm audit` offers no fix other than downgrading ESLint to 4.x, so they stay.
+
 ## Tests
 
 `npm test` covers the API client (URL normalization, every endpoint, request bodies, backend error messages, non-JSON and network failures, timeouts), task parsing and validation, target option building, result summaries, data URL decoding, and settings persistence.
@@ -147,6 +160,8 @@ The Lit component itself has no automated test in this package; it was checked i
 Verified locally (Node 24.19.0, macOS):
 
 - `npm install`, `npm run lint`, `npm test` (25 tests) and `npm run build` succeed, and `dist/` contains `manifest.json`, `index.html` and `index.js`.
+- `npm run package` builds the production bundle with no webpack warnings and writes `dist.zip`.
+  In headless Chromium at 320 px the production build loads with no console warnings or errors, connects to `http://localhost:<port>`, runs a resize, opens the target format picker, and passes a PNG blob to a stubbed `addImage`.
 - In headless Chromium at 320 px, the built panel connects to a running `python -m webapp` over `http://localhost`, loads samples, formats and pipelines, runs a resize, shows the preview, validation and metrics, accepts an uploaded task JSON, switches target format through the picker, and calls `addImage` once for **Add to page** and 13 times for **Add all formats** with PNG blobs.
   `addImage` was a stub there, because the real SDK only works inside Express.
 

@@ -13,10 +13,12 @@ From the repository root:
 
 ```text
 python -m unittest discover -s tests -v
-python -m scripts.run_matrix --pipelines adaptive --schema --variants --include-source --check-determinism --strict-quality --output-dir output/backend/stress
-python -m scripts.run_matrix --input-dir tests/fixtures --pipelines adaptive --schema --render --strict-quality --check-determinism --include-source --output-dir output/backend/fixtures
-python -m scripts.run_matrix --pipelines adaptive --schema --render --strict-quality --check-determinism --output-dir output/backend/render
-python -m scripts.run_matrix --pipelines anchored layout_v1 flow adaptive --schema --render --strict-quality --reference-pipelines anchored layout_v1 flow --output-dir output/backend/comparison
+python -m scripts.run_matrix --pipelines adaptive --schema --variants --include-source --check-determinism --strict-quality --output-dir output/engine/stress
+python -m scripts.run_matrix --input-dir tests/fixtures --pipelines adaptive --schema --render --strict-quality --check-determinism --include-source --output-dir output/engine/fixtures
+python -m scripts.run_matrix --input-dir tests/heldout --pipelines adaptive --schema --render --strict-quality --check-determinism --include-source --output-dir output/engine/heldout
+python -m scripts.run_matrix --pipelines adaptive --schema --render --strict-quality --check-determinism --output-dir output/engine/input
+python -m scripts.run_matrix --pipelines anchored layout_v1 flow adaptive --schema --render --strict-quality --reference-pipelines anchored layout_v1 flow --output-dir output/engine/comparison
+scripts/docker_check.sh                        # also: --input tests/heldout, --input tests/fixtures
 ```
 
 Targets come from the shared catalogue in `pipelines/common/formats.py`
@@ -60,17 +62,21 @@ Mixed groups (some art present) keep their shared group transform.
    retain their geometry transform; labels may reduce font size to fit. The
    actual renderer must produce the expected dimensions and retain its warnings.
 3. **Collision:** zero unrelated content-unit overlaps on this corpus.
-   Overlaps inside a group and behind translucent decorations are intentional
-   candidates. The rectangle metric is conservative for transparent artwork.
-4. **Readability:** report every text size, counts below 6px and 10px, and the
+   Overlaps inside a group and behind translucent decorations are intentional candidates.
+   Collisions use painted bounds: transparent padding of art and empty text-box space do not count.
+4. **Canvas fill:** a full-bleed backdrop in the source (any unrotated element covering at least 85% of it: solid fill, paper sheet, scrim or cover image) must still cover the target as far as it can, within 5%.
+   Shapes and cover images can reach the whole canvas; other images reach their ratio-preserving fit.
+   The empty canvas share may not grow by more than 40 points over the source.
+   `--strict-quality` fails either, which catches a backdrop shrunk into a floating box that overflow and collision checks cannot see.
+5. **Readability:** report every text size, counts below 6px and 10px, and the
    minimum per design. Use `--min-font 10` for a feasible readable subset;
    use the stress suite to measure compromises. These thresholds are diagnostic,
    not official rules. Passing the overflow gate does not imply readable text.
-5. **Stability:** repeated calls, renamed ids/groups, reordered elements with
+6. **Stability:** repeated calls, renamed ids/groups, reordered elements with
    distinct geometry, and intervening tasks must produce stable geometry.
    Test source array reordering only where paint order is unambiguous. Tests
    also check font metrics against the real converter and long unbroken words.
-6. **Visual review:** inspect native-size source/output comparisons for all
+7. **Visual review:** inspect native-size source/output comparisons for all
    public tasks and representative portrait, landscape and narrow targets.
    Check complete visible copy, headline prominence, product/logo visibility,
    coherent buttons/badges, margins and contrast. Record failures even when the
@@ -79,39 +85,50 @@ Mixed groups (some art present) keep their shared group transform.
    `metrics.images` reports visible artwork dimensions after transparent padding
    and image fitting, making product/logo shrinkage easier to spot.
 
-## Current results (2026-10-30)
+## Current results (2026-10-30, round 2)
 
-All 41 unit tests pass (`python -m unittest discover -s tests -v`).
-Gated runs, adaptive pipeline, all with zero gated failures:
+All 56 unit tests pass (`python -m unittest discover -s tests -v`).
+Lint is clean (`uvx ruff check pipelines scripts tests`).
+Gated runs, adaptive pipeline, all with zero gated failures (strict quality includes the canvas-fill gate):
 
-| Run | Cases | Contract | Overflow | Overlap | Nondeterministic | Below 6px | Median ms | p95 ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Public + variants + source canvas (`stress`) | 168 | 0 | 0 | 0 | 0 | 41 | 122 | 1781 |
-| Independent fixtures, real renderer | 30 | 0 | 0 | 0 | 0 | 0 | 53 | 127 |
-| Public samples, real renderer | 39 | 0 | 0 | 0 | 0 | 6 | 126 | 2099 |
+| Run | Cases | Contract | Overflow | Overlap | Backdrop / empty | Nondeterministic |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Public + variants + source canvas (`stress`, macOS venv) | 168 | 0 | 0 | 0 | 0 | 0 |
+| Independent fixtures, real renderer, source canvas (macOS venv) | 30 | 0 | 0 | 0 | 0 | 0 |
+| Held-out corpus, real renderer, source canvas (macOS venv) | 84 | 0 | 0 | 0 | 0 | 0 |
+| Public samples, real renderer (macOS venv) | 39 | 0 | 0 | 0 | 0 | 0 |
+| Public samples, real renderer, inside the Linux container | 39 | 0 | 0 | 0 | 0 | not run |
+| Held-out corpus, real renderer, inside the Linux container | 78 | 0 | 0 | 0 | 0 | not run |
 
-Minimum font size (px) per public sample and target, real renderer run:
+Minimum painted font size (px) per public sample and target.
+"Before" is round 1 (commit `0fe5c64`), whose fractional sizes paint at the integer in brackets.
+"venv" is macOS; "Docker" is the same matrix run inside the scored image, where Skia's hinted metrics can change the selected layout.
 
-| Target | Size | Level 1 | Level 2 | Level 3 |
-| --- | --- | ---: | ---: | ---: |
-| instagram_post | 1080x1080 | 30.0 | 26.8 | 16.5 |
-| instagram_portrait | 1080x1350 | 54.9 | 33.5 | 12.0 |
-| story | 1080x1920 | 68.0 | 37.9 | 20.4 |
-| youtube_thumb | 1280x720 | 45.3 | 25.3 | 16.2 |
-| facebook_cover | 1640x624 | 58.1 | 32.4 | 19.5 |
-| twitter_header | 1500x500 | 53.1 | 29.6 | 17.3 |
-| linkedin_banner | 1584x396 | 56.1 | 27.9 | 16.4 |
-| pinterest_pin | 1000x1500 | 53.1 | 37.2 | 20.1 |
-| banner_wide | 1600x400 | 56.6 | 28.2 | 16.6 |
-| leaderboard | 728x90 | 25.8 | 10.5 | 5.9 |
-| skyscraper | 160x600 | 21.2 | 7.0 | 5.4 |
-| medium_rect | 300x250 | 10.8 | 7.2 | 4.8 |
-| a4_portrait | 794x1123 | 39.8 | 27.8 | 15.2 |
+| Target | L1 before | L1 venv | L1 Docker | L2 before | L2 venv | L2 Docker | L3 before | L3 venv | L3 Docker |
+| --- | --- | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: |
+| instagram_post | 30.0 (30) | 38 | 38 | 26.8 (26) | 18 | 18 | 16.5 (16) | 14 | 14 |
+| instagram_portrait | 54.9 (54) | 38 | 38 | 33.5 (33) | 26 | 26 | 12.0 (12) | 12 | 12 |
+| story | 68.0 (67) | 59 | 59 | 37.9 (37) | 37 | 37 | 20.4 (20) | 19 | 26 |
+| youtube_thumb | 45.3 (45) | 39 | 39 | 25.3 (25) | 25 | 25 | 16.2 (16) | 15 | 15 |
+| facebook_cover | 58.1 (58) | 50 | 50 | 32.4 (32) | 32 | 32 | 19.5 (19) | 15 | 15 |
+| twitter_header | 53.1 (53) | 46 | 46 | 29.6 (29) | 29 | 29 | 17.3 (17) | 15 | 15 |
+| linkedin_banner | 56.1 (56) | 48 | 48 | 27.9 (27) | 26 | 26 | 16.4 (16) | 13 | 13 |
+| pinterest_pin | 53.1 (53) | 53 | 53 | 37.2 (37) | 29 | 29 | 20.1 (20) | 15 | 15 |
+| banner_wide | 56.6 (56) | 49 | 49 | 28.2 (28) | 26 | 26 | 16.6 (16) | 13 | 13 |
+| leaderboard | 25.8 (25) | 22 | 22 | 10.5 (10) | 10 | 10 | 5.9 (5) | 5 | 4 |
+| skyscraper | 21.2 (21) | 18 | 18 | 7.0 (6) | 7 | 7 | 5.4 (5) | 6 | 6 |
+| medium_rect | 10.8 (10) | 10 | 10 | 7.2 (7) | 7 | 7 | 4.8 (4) | 5 | 5 |
+| a4_portrait | 39.8 (39) | 39 | 39 | 27.8 (27) | 22 | 22 | 15.2 (15) | 15 | 15 |
 
-The requested targets are Level 1 at 1080x1350, Level 2 at 1600x400 and Level 3 at 728x90.
-Level 3 at 728x90 keeps all copy at 5.9-10.2px (headline 10.2px, legal line 5.9px).
-Its binding constraint is the row of four pills: their source widths total 1310px and one shared scale drives every font, so even an empty canvas would cap pill labels near 8.3px.
-Level 3 at instagram_portrait reports 12px because the source legal line is 12px.
+Lower minimums are mostly deliberate: round 1 inflated supporting copy toward the headline (Level 1 at 1080x1350 painted the CTA at 54px under a 75px headline; it is now 38px under 76px, the source's 1:2 ratio), and the score now credits headline prominence and art size.
+The minimum alone is therefore not a quality ranking; inspect the PNGs.
+Level 3 at 728x90 in the container paints the headline at 13px (11px before) and the legal line at 4px (5px before); everything is inside the canvas (round 1 cut the legal line at the bottom edge).
+
+Held-out corpus at its requested targets, container renders, minimum painted font before and after: product trio 27 to 31 (no 2 + 1 restack), sparse decor 7 to 30 (backdrop now covers the canvas, previously 24%), accented copy 31 to 26 (footer one line instead of four), editorial columns 8 to 19 (paper sheet now covers the canvas, previously 16%), layered groups 15 to 25 (scrim covers the canvas, previously 38%), severe downscale 7 to 7.
+
+Container runtime per task (`python -m engine.main` inside the image under Rosetta, including rendering): Level 1 0.27s, Level 2 0.45s, Level 3 1.95s; held-out 0.18s to 1.39s.
+Round 1 measured 0.20s, 0.32s and 2.97s for the samples and up to 5.10s (editorial columns) in the same setup.
+Inside the in-container matrix, search time per case has a median of 0.31s and a maximum of 2.1s (Level 3 at wide banner sizes).
 
 ## Corpus and independence
 
@@ -127,6 +144,8 @@ Level 3 at instagram_portrait reports 12px because the source legal line is 12px
   in a separate directory before tuning weights or adding patterns. Run the
   same runner via `--input-dir`. Do not claim the included development fixtures
   as held-out evidence; they were used during implementation.
+- `tests/heldout/` was authored blind, but round 2 fixed failure classes it exposed (lost backdrops, uneven restacks, oversized footers), so it is now development data rather than held-out evidence.
+  A new blind set is being authored separately; the engine track did not open it.
 
 More useful next fixtures: three or more image groups, coincident geometry,
 unusually long group labels, supported non-ASCII text, sparse decoration-only
@@ -149,5 +168,18 @@ docker run --rm --network none --mount "type=bind,source=$evalInput,target=/app/
 Use a new output folder each run so stale files cannot satisfy the check.
 Verify one artifact pair per task, target dimensions, contract/schema validity
 and actual text/asset rendering. No runtime network access or downloads are
-needed. The container check is owned by the Docker track and was not re-run as part of the backend pass.
+needed. `scripts/docker_check.sh` does all of this in one command.
 RULES.md sets no hard latency limit; quality is prioritized over speed.
+
+### Platform parity
+
+Skia returns hinted integer glyph advances on Linux and fractional ones on macOS.
+The engine measures exactly like the renderer on the same host, so copy never overflows on either platform, but the selected layout can differ between the venv and the container.
+Make final visual judgments from container renders.
+To run the evaluation matrix inside the scored image, mount the repository:
+
+```text
+docker run --rm --platform linux/amd64 --network none --entrypoint python -v "$PWD:/work" -w /work chameleon-engine -m scripts.run_matrix --pipelines adaptive --render --strict-quality --output-dir output/engine/docker-matrix-input
+```
+
+`--schema` needs `requirements-dev.txt`, which the image does not install.

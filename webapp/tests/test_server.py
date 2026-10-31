@@ -5,13 +5,16 @@ Run from the repo root: .venv/bin/python -m unittest discover -s webapp/tests -t
 
 import base64
 import json
+import os
+import socket
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
-from webapp.server import make_server
+from webapp.server import MAX_BODY_BYTES, make_server, make_servers, server_url
 
 ROOT = Path(__file__).resolve().parents[2]
 LEVEL1 = ROOT / "input" / "chameleon_sample_level1_warmup.json"
@@ -77,9 +80,24 @@ class ServerTest(unittest.TestCase):
     def test_pipelines(self):
         import pipelines
 
-        data = self.get_json("/api/pipelines")
-        self.assertEqual(data["pipelines"], list(pipelines.PIPELINES))
-        self.assertEqual(data["default"], pipelines.DEFAULT)
+        with patch.dict(os.environ):
+            os.environ.pop("CHAMELEON_PIPELINE", None)
+            data = self.get_json("/api/pipelines")
+            self.assertEqual(data["pipelines"], list(pipelines.PIPELINES))
+            self.assertEqual(data["default"], pipelines.DEFAULT)
+            os.environ["CHAMELEON_PIPELINE"] = "anchored"
+            self.assertEqual(self.get_json("/api/pipelines")["default"], "anchored")
+            os.environ["CHAMELEON_PIPELINE"] = "no-such-pipeline"
+            self.assertEqual(self.get_json("/api/pipelines")["default"], pipelines.DEFAULT)
+
+    def test_default_pipeline_matches_advertised_default(self):
+        """A request without "pipeline" runs exactly what /api/pipelines calls the default."""
+        task = json.loads(LEVEL1.read_text())
+        body = {"source": task["source"], "target_canvas": task["target_canvas"]}
+        for env in ("anchored", "no-such-pipeline"):
+            with self.subTest(env=env), patch.dict(os.environ, {"CHAMELEON_PIPELINE": env}):
+                advertised = self.get_json("/api/pipelines")["default"]
+                self.assertEqual(self.post_json(body)["pipeline"], advertised)
 
     def test_samples_list_and_fetch(self):
         samples = self.get_json("/api/samples")["samples"]
@@ -92,7 +110,10 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(level1["target_canvas"], task["target_canvas"])
         self.assertEqual(level1["element_count"], len(task["source"]["elements"]))
         self.assertIn(("fixtures", "editorial"), by_key)
-        self.assertTrue({s["dir"] for s in samples} <= {"input", "fixtures", "heldout"})
+        self.assertTrue(all(d in ("input", "fixtures") or d.startswith("heldout") for d in {s["dir"] for s in samples}))
+        for heldout in sorted((ROOT / "tests").glob("heldout*")):
+            if any(heldout.glob("*.json")):
+                self.assertIn(heldout.name, {s["dir"] for s in samples})
         self.assertEqual(self.get_json(f"/api/samples/input/{LEVEL1.stem}"), task)
 
     def test_sample_not_found_and_traversal(self):
@@ -155,11 +176,7 @@ class ServerTest(unittest.TestCase):
         task = json.loads(LEVEL1.read_text())
         data = self.post_json({"source": task["source"], "target_canvas": task["target_canvas"]})
         self.check_resize(data, task)
-        import os
-
-        import pipelines
-
-        self.assertEqual(data["pipeline"], os.environ.get("CHAMELEON_PIPELINE") or pipelines.DEFAULT)
+        self.assertEqual(data["pipeline"], self.get_json("/api/pipelines")["default"])
 
     def test_resize_full_task_and_pipeline(self):
         task = json.loads(LEVEL1.read_text())
@@ -184,6 +201,7 @@ class ServerTest(unittest.TestCase):
              "target_canvas": {"width": 5, "height": 5}},
             {"task": "nope"},
             {"task": task, "pipeline": "does-not-exist"},
+            {"task": task, "pipeline": ["anchored"]},
         ]
         for body in cases:
             with self.subTest(body=str(body)[:80]):
@@ -195,9 +213,30 @@ class ServerTest(unittest.TestCase):
         # The server must keep answering after bad requests.
         self.assertEqual(self.get_json("/api/health"), {"ok": True})
 
-    def test_engine_failure_returns_500(self):
-        from unittest.mock import patch
+    def raw_exchange(self, request: bytes) -> bytes:
+        """Send raw bytes on one connection and return everything the server sends back."""
+        with socket.create_connection(("127.0.0.1", self.server.server_address[1]), timeout=10) as sock:
+            sock.sendall(request)
+            chunks = []
+            while chunk := sock.recv(65536):
+                chunks.append(chunk)
+        return b"".join(chunks)
 
+    def test_unframed_bodies_close_the_connection(self):
+        """Bodies the server will not read must not be parsed as a follow-up request."""
+        smuggled = b"GET /api/health HTTP/1.1\r\nHost: x\r\n\r\n"
+        cases = {
+            "chunked": b"Transfer-Encoding: chunked\r\n\r\n" + b"%x\r\n" % len(smuggled) + smuggled + b"\r\n0\r\n\r\n",
+            "bad length": b"Content-Length: abc\r\n\r\n" + smuggled,
+            "too large": b"Content-Length: %d\r\n\r\n" % (MAX_BODY_BYTES + 1) + smuggled,
+        }
+        for name, rest in cases.items():
+            with self.subTest(name):
+                reply = self.raw_exchange(b"POST /api/resize HTTP/1.1\r\nHost: x\r\n" + rest)
+                self.assertEqual(reply.count(b"HTTP/1.1 "), 1, reply[:300])
+                self.assertRegex(reply.split(b"\r\n", 1)[0], rb" 4(00|13) ")
+
+    def test_engine_failure_returns_500(self):
         task = json.loads(LEVEL1.read_text())
         with patch("webapp.server.run_engine", side_effect=RuntimeError("boom")):
             data = self.post_json({"task": task}, expect=500)
@@ -226,6 +265,34 @@ class ServerTest(unittest.TestCase):
         for width, status, payload in results:
             self.assertEqual(status, 200)
             self.assertEqual(png_size(payload["output_png"]), (width, 600))
+
+
+class LocalhostBindTest(unittest.TestCase):
+    """`make_servers("localhost")` must answer on both loopback families."""
+
+    def test_localhost_binds_ipv4_and_ipv6(self):
+        servers = make_servers("localhost", 0, quiet=True)
+        self.addCleanup(lambda: [s.server_close() for s in servers])
+        families = {s.address_family for s in servers}
+        self.assertIn(socket.AF_INET, families)
+        if not socket.has_ipv6 or len(servers) == 1:
+            self.skipTest("no IPv6 loopback on this machine")
+        self.assertEqual(families, {socket.AF_INET, socket.AF_INET6})
+        self.assertEqual(len({s.server_address[1] for s in servers}), 1)
+        threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in servers]
+        for t in threads:
+            t.start()
+        self.addCleanup(lambda: [s.shutdown() for s in servers])
+        port = servers[0].server_address[1]
+        for host in ("127.0.0.1", "[::1]"):
+            with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=10) as resp:
+                self.assertEqual(json.loads(resp.read()), {"ok": True}, host)
+        self.assertEqual(server_url(servers[0]), f"http://localhost:{port}")
+
+    def test_explicit_host_binds_only_that_address(self):
+        servers = make_servers("127.0.0.1", 0, quiet=True)
+        self.addCleanup(lambda: [s.server_close() for s in servers])
+        self.assertEqual([s.server_address[0] for s in servers], ["127.0.0.1"])
 
 
 if __name__ == "__main__":

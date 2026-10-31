@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import errno
 import hashlib
 import importlib
 import json
@@ -26,6 +27,8 @@ import math
 import mimetypes
 import os
 import re
+import socket
+import socketserver
 import sys
 import threading
 import time
@@ -43,10 +46,12 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 ASSETS_DIR = ROOT / "brand_kit" / "assets"
 FONTS_DIR = ROOT / "brand_kit" / "fonts"
 RENDER_TMP = ROOT / "output" / "webapp" / "render-tmp"
+# Sample folders by API name: the challenge inputs, the test fixtures and every
+# held-out corpus (tests/heldout, tests/heldout2, ...), discovered at import time.
 SAMPLE_DIRS = {
     "input": ROOT / "input",
     "fixtures": ROOT / "tests" / "fixtures",
-    "heldout": ROOT / "tests" / "heldout",
+    **{path.name: path for path in sorted((ROOT / "tests").glob("heldout*")) if path.is_dir()},
 }
 
 if str(ROOT) not in sys.path:  # Allow `python webapp/server.py` as well as `-m webapp`.
@@ -81,12 +86,20 @@ def _api_module():
 
 
 def pipeline_names() -> tuple[list[str], str]:
+    """Return (available names, the pipeline a request without "pipeline" will use).
+
+    The default mirrors the engine CLI: CHAMELEON_PIPELINE when it names a known
+    pipeline, else `pipelines.DEFAULT`. An unknown env value is ignored here (the
+    viewer warns about it at startup) instead of failing every request.
+    """
     import pipelines
 
-    return list(pipelines.PIPELINES), pipelines.DEFAULT
+    names = list(pipelines.PIPELINES)
+    env = os.environ.get("CHAMELEON_PIPELINE")
+    return names, env if env in names else pipelines.DEFAULT
 
 
-def run_engine(source: dict, target: dict, pipeline: str | None) -> dict:
+def run_engine(source: dict, target: dict, pipeline: str | None = None) -> dict:
     """Resize `source` to `target` and return output/validation/metrics/score/pipeline/elapsed_ms."""
     api = _api_module()
     if api is not None and hasattr(api, "run"):
@@ -97,7 +110,7 @@ def run_engine(source: dict, target: dict, pipeline: str | None) -> dict:
     from pipelines.common.quality import metrics, score
     from pipelines.common.validate import validate
 
-    name = pipeline or os.environ.get("CHAMELEON_PIPELINE") or pipelines.DEFAULT
+    name = pipeline or pipeline_names()[1]
     resize = pipelines.get_pipeline(name)
     started = time.perf_counter()
     output = resize(source, {"width": target["width"], "height": target["height"]})
@@ -140,7 +153,7 @@ def render_source_png(source: dict) -> tuple[str, list[str]]:
     return result
 
 
-def parse_resize_request(body: Any) -> tuple[dict, dict, str | None]:
+def parse_resize_request(body: Any) -> tuple[dict, dict, str]:
     if not isinstance(body, dict):
         raise BadRequest("request body must be a JSON object")
     task = body.get("task")
@@ -156,12 +169,11 @@ def parse_resize_request(body: Any) -> tuple[dict, dict, str | None]:
         raise BadRequest("missing 'target_canvas' object with width and height")
     target = {"width": target.get("width"), "height": target.get("height")}
     pipeline = body.get("pipeline")
+    names, default = pipeline_names()
     if pipeline in ("", None):
-        pipeline = None
-    else:
-        names, _ = pipeline_names()
-        if pipeline not in names:
-            raise BadRequest(f"unknown pipeline {pipeline!r}; available: {', '.join(names)}")
+        pipeline = default  # Resolved here so the response names exactly what /api/pipelines advertised.
+    elif not isinstance(pipeline, str) or pipeline not in names:
+        raise BadRequest(f"unknown pipeline {pipeline!r}; available: {', '.join(names)}")
 
     from pipelines.common.validate import validate_input
 
@@ -252,6 +264,9 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "ChameleonViewer/1.0"
     protocol_version = "HTTP/1.1"
     quiet = False
+    # Socket read timeout: drops idle keep-alive connections and clients that stall
+    # mid-request, so they cannot pin handler threads forever.
+    timeout = 30
 
     # ---- plumbing
 
@@ -358,17 +373,25 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/resize":
             self._error(HTTPStatus.NOT_FOUND, f"unknown endpoint {path}")
             return
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True  # The unread body would be parsed as the next request.
+            raise BadRequest("chunked request bodies are not supported; send Content-Length")
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
+            self.close_connection = True
             raise BadRequest("invalid Content-Length") from None
         if length <= 0:
             raise BadRequest("request body is empty")
         if length > MAX_BODY_BYTES:
             self.close_connection = True
-            self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body too large")
+            self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                        f"request body too large (limit {MAX_BODY_BYTES // (1024 * 1024)} MiB)")
             return
         raw = self.rfile.read(length)
+        if len(raw) < length:
+            self.close_connection = True
+            raise BadRequest("request body ended early")
         try:
             body = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
@@ -381,8 +404,64 @@ mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 
 
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # Browsers routinely drop keep-alive connections and abort superseded
+        # requests; that is not a server error worth a traceback.
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+    def server_bind(self) -> None:
+        if self.address_family == socket.AF_INET6 and self.server_address[0] == "::":
+            # Wildcard IPv6 also accepts IPv4 (dual stack) where the OS allows it.
+            with contextlib.suppress(OSError, AttributeError):
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        # Skip HTTPServer.server_bind: its reverse DNS lookup (getfqdn) can stall for seconds.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
+
+
 def make_server(host: str = "127.0.0.1", port: int = 8765, quiet: bool = False) -> ThreadingHTTPServer:
+    """Bind one listening socket. IPv6 literals ("::1", "::") get an IPv6 socket."""
     handler = type("ChameleonHandler", (Handler,), {"quiet": quiet})
-    server = ThreadingHTTPServer((host, port), handler)
-    server.daemon_threads = True
-    return server
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    server_class = type("ChameleonServer", (_Server,), {"address_family": family})
+    return server_class((host, port), handler)
+
+
+LOCALHOST = "localhost"
+
+
+def make_servers(host: str = LOCALHOST, port: int = 8765, quiet: bool = False) -> list[ThreadingHTTPServer]:
+    """Bind the viewer; "localhost" means both 127.0.0.1 and ::1 on the same port.
+
+    Browsers may resolve localhost to either address, so binding only one of them
+    makes http://localhost:<port> fail on some machines. If the machine has no IPv6
+    loopback, the IPv4 socket alone is used. Any other host binds exactly that address.
+    """
+    if host != LOCALHOST:
+        return [make_server(host, port, quiet)]
+    for _attempt in range(5 if port == 0 else 1):
+        first = make_server("127.0.0.1", port, quiet)
+        chosen = first.server_address[1]
+        try:
+            return [first, make_server("::1", chosen, quiet)]
+        except OSError as exc:
+            if exc.errno in (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
+                return [first]  # No IPv6 loopback on this machine.
+            first.server_close()
+            if port != 0 or exc.errno != errno.EADDRINUSE:
+                raise
+    raise OSError(errno.EADDRINUSE, "could not find a port free on both 127.0.0.1 and ::1")
+
+
+def server_url(server: ThreadingHTTPServer, host: str = LOCALHOST) -> str:
+    """Browser URL for a bound server; wildcard binds are shown as localhost."""
+    port = server.server_address[1]
+    if host in (LOCALHOST, "", "0.0.0.0", "::"):
+        return f"http://localhost:{port}"
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"

@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from pipelines import get_pipeline
 from pipelines.common.quality import metrics
-from pipelines.common.text import fit_text, measure
+from pipelines.common.text import fit_text, measure, paint_size
 from pipelines.common.validate import is_background, validate
 from scripts.run_matrix import TARGETS, variants
 from scripts.run_matrix import main as matrix_main
@@ -183,7 +183,8 @@ class LayoutTests(unittest.TestCase):
             scale = group[0]["width"] / original[0]["width"]
             self.assertAlmostEqual(group[1]["x"] - group[0]["x"], 8 * scale)
             self.assertAlmostEqual(group[1]["y"] - group[0]["y"], 12 * scale)
-            self.assertAlmostEqual(group[1]["font_size"], 14 * scale)
+            # Labels paint at an integer size; the group box keeps the exact transform.
+            self.assertEqual(group[1]["font_size"], paint_size(14 * scale))
 
     def test_rotated_groups_and_missing_roles(self):
         source = dict(variants(fixture()))["rotated_groups"]

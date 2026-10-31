@@ -4,8 +4,10 @@
 
   const $ = (id) => document.getElementById(id);
   const DIR_LABELS = { input: "Challenge samples", fixtures: "Test fixtures", heldout: "Held-out set" };
+  const dirLabel = (dir) => DIR_LABELS[dir] || dir.replace(/^heldout(\d+)$/, "Held-out set $1");
   const MAX_SIDE = 8192;
   const MAX_UPSCALE = 2;
+  const STACKED_MIN_STAGE = 160;
 
   const state = {
     formats: [],
@@ -16,7 +18,7 @@
     resultLabel: "",
     runToken: 0,
     abort: null,
-    compare: { running: false, cancelled: false, results: [] },
+    compare: { running: false, cancelled: false, results: [], abort: null },
   };
 
   const el = {
@@ -147,9 +149,9 @@
     const groups = {};
     for (const s of samples) (groups[s.dir] ||= []).push(s);
     for (const [dir, items] of Object.entries(groups)) {
-      const group = h("optgroup", { label: DIR_LABELS[dir] || dir });
+      const group = h("optgroup", { label: dirLabel(dir) });
       for (const s of items) {
-        const label = s.difficulty_label ? `${s.difficulty_label.replace(/\s+—\s+|\s+-\s+/, ": ")}` : s.task_id;
+        const label = s.difficulty_label ? `${s.difficulty_label.replace(/\s+[\u2014-]\s+/, ": ")}` : s.task_id;
         group.append(h("option", { value: `${s.dir}/${s.name}` }, `${label}  ·  ${dims(s.canvas)}`));
       }
       select.append(group);
@@ -262,9 +264,10 @@
     $("design-origin").textContent = origin === "upload" ? "Uploaded" : "Sample";
     $("design-canvas").textContent = dims(source.canvas);
     $("design-elements").textContent = Array.isArray(source.elements) ? source.elements.length : "-";
-    $("design-level").textContent = task.difficulty_label ? task.difficulty_label.split(/\s+[—-]\s+/)[0] : "-";
+    $("design-level").textContent = task.difficulty_label ? task.difficulty_label.split(/\s+[\u2014-]\s+/)[0] : "-";
     $("design-level").title = task.difficulty_label || "";
     el.designCard.hidden = false;
+    stopCompare();
     state.compare.results = [];
     renderCompareGrid();
     renderFormats();
@@ -285,9 +288,9 @@
     el.runBtn.setAttribute("aria-busy", String(running));
   }
 
-  function requestBody(target) {
+  function requestBody(target, source = state.task.source) {
     return JSON.stringify({
-      source: state.task.source,
+      source,
       target_canvas: { width: target.width, height: target.height },
       pipeline: el.pipeline.value || undefined,
     });
@@ -371,12 +374,19 @@
     const w = Number(frame.dataset.w);
     const hgt = Number(frame.dataset.h);
     if (!w || !hgt) return;
+    stage.style.height = "";  // Measure against the stylesheet height first.
     const style = getComputedStyle(stage);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const availW = stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    const availH = stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    const availH = stage.clientHeight - padY;
     const scale = Math.min(availW / w, availH / hgt, MAX_UPSCALE);
+    const frameH = Math.max(1, Math.floor(hgt * scale));
     frame.style.width = `${Math.max(1, Math.floor(w * scale))}px`;
-    frame.style.height = `${Math.max(1, Math.floor(hgt * scale))}px`;
+    frame.style.height = `${frameH}px`;
+    // Stacked previews (narrow screens): shrink the stage to the design so a wide banner
+    // does not sit in a tall empty checkerboard. Side by side, both stages keep one height.
+    const stacked = getComputedStyle(stage.closest(".previews")).gridTemplateColumns.trim().split(/\s+/).length === 1;
+    if (stacked) stage.style.height = `${Math.max(STACKED_MIN_STAGE, Math.ceil(frameH + padY))}px`;
     updateLabels(frame, scale);
   }
 
@@ -548,16 +558,24 @@
     if (result && state.result) requestAnimationFrame(refit);
   }
 
+  function stopCompare() {
+    const c = state.compare;
+    c.cancelled = true;
+    if (c.abort) c.abort.abort();
+  }
+
   async function compareAll() {
     if (!state.task || state.compare.running) return;
     clearError();
     const formats = state.formats.map((f) => ({ ...f }));
     const pipeline = el.pipeline.value;
+    const source = state.task.source;  // Pinned: the design must not change mid-run.
     const c = state.compare;
     c.running = true;
     c.cancelled = false;
     c.pipeline = pipeline;
-    c.results = formats.map((f) => ({ format: f, status: "queued" }));
+    const results = formats.map((f) => ({ format: f, status: "queued" }));
+    c.results = results;
     updateButtons();
     showView("compare");
     $("compare-cancel").hidden = false;
@@ -565,30 +583,37 @@
     $("compare-title").textContent = `All formats · ${state.task.task_id || state.taskName}`;
     $("compare-sub").textContent = `Pipeline ${pipeline}. Click a result to inspect it.`;
     renderCompareGrid();
-    for (let i = 0; i < c.results.length; i += 1) {
+    for (let i = 0; i < results.length; i += 1) {
       if (c.cancelled) break;
-      const item = c.results[i];
+      const item = results[i];
       item.status = "running";
       updateCompareProgress(i);
       renderCompareCard(i);
+      c.abort = new AbortController();
       try {
         item.result = await api("/api/resize", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: requestBody(item.format),
+          body: requestBody(item.format, source), signal: c.abort.signal,
         });
         item.status = "done";
       } catch (err) {
-        item.status = "error";
+        item.status = err.name === "AbortError" ? "skipped" : "error";
         item.error = err.message;
       }
+      c.abort = null;
+      if (c.results !== results) break;  // A new design was loaded; its view is already reset.
       renderCompareCard(i);
     }
-    for (const item of c.results) if (item.status === "queued") item.status = "skipped";
+    for (const item of results) if (item.status === "queued") item.status = "skipped";
     c.running = false;
-    renderCompareGrid();
-    updateCompareProgress(c.results.filter((r) => r.status === "done" || r.status === "error").length);
     $("compare-cancel").hidden = true;
     updateButtons();
+    if (c.results !== results) {
+      run();  // A design loaded mid-compare could not run then; show its result now.
+      return;
+    }
+    renderCompareGrid();
+    updateCompareProgress(results.filter((r) => r.status === "done" || r.status === "error").length);
   }
 
   function updateCompareProgress(done) {
@@ -711,7 +736,7 @@
     el.pipeline.addEventListener("change", () => { if (state.task && !el.result.hidden) run(); });
     el.runBtn.addEventListener("click", run);
     el.compareBtn.addEventListener("click", compareAll);
-    $("compare-cancel").addEventListener("click", () => { state.compare.cancelled = true; });
+    $("compare-cancel").addEventListener("click", stopCompare);
     $("error-close").addEventListener("click", clearError);
 
     el.tabResult.addEventListener("click", () => showView("result"));
@@ -749,7 +774,7 @@
     });
 
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); run(); }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !el.zoom.open) { e.preventDefault(); run(); }
     });
     new ResizeObserver(refit).observe($("source-stage"));
     new ResizeObserver(refit).observe($("output-stage"));

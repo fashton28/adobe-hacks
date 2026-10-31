@@ -1,7 +1,7 @@
+// Only the Express theme fragments: <sp-theme system="express"> never reads the default
+// Spectrum ones, and they would add about 300 KiB of unused CSS to the bundle.
 import "@spectrum-web-components/theme/express/scale-medium.js";
 import "@spectrum-web-components/theme/express/theme-light.js";
-import "@spectrum-web-components/theme/scale-medium.js";
-import "@spectrum-web-components/theme/theme-light.js";
 import "@spectrum-web-components/theme/sp-theme.js";
 
 import "@spectrum-web-components/action-button/sp-action-button.js";
@@ -36,6 +36,10 @@ import { panelStyles } from "./panel-styles.js";
 
 const UPLOAD_KEY = "__upload__";
 const SAMPLE_GROUP_LABELS = { input: "Examples", fixtures: "Fixtures", heldout: "Held-out" };
+
+function sampleGroupLabel(dir) {
+    return SAMPLE_GROUP_LABELS[dir] ?? dir.replace(/^heldout(\d+)$/, "Held-out $1");
+}
 
 function sampleKey(sample) {
     return `${sample.dir}/${sample.name}`;
@@ -419,7 +423,7 @@ export class ChameleonPanel extends LitElement {
             ${[...groups.entries()].map(
                 ([dir, samples]) => html`<sp-menu-divider></sp-menu-divider>
                     <sp-menu-group>
-                        <span slot="header">${SAMPLE_GROUP_LABELS[dir] ?? dir}</span>
+                        <span slot="header">${sampleGroupLabel(dir)}</span>
                         ${samples.map(
                             (sample) => html`<sp-menu-item value=${sampleKey(sample)}>${sampleLabel(sample)}</sp-menu-item>`
                         )}
