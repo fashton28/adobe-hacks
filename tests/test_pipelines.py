@@ -4,22 +4,23 @@ Run with: python -m unittest discover -s tests -v
 """
 
 import copy
-from contextlib import contextmanager
 import json
 import math
-import subprocess
 import shutil
+import subprocess
 import sys
 import unittest
-from unittest.mock import patch
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from pipelines import get_pipeline
 from pipelines.common.quality import metrics
-from pipelines.common.text import fit_text, measure
+from pipelines.common.text import fit_text, measure, paint_size
 from pipelines.common.validate import is_background, validate
-from scripts.run_matrix import TARGETS, main as matrix_main, variants
+from scripts.run_matrix import TARGETS, variants
+from scripts.run_matrix import main as matrix_main
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -143,9 +144,14 @@ class LayoutTests(unittest.TestCase):
         task = samples()[2]
         source, target = task["source"], task["target_canvas"]
         before = metrics(source, get_pipeline("layout_v1")(source, target))
-        after = metrics(source, get_pipeline("flow")(source, target))
+        after = metrics(source, get_pipeline("adaptive")(source, target))
         self.assertGreater(after["min_font"], before["min_font"] * 1.5)
         self.assertLess(after["below_6px"], before["below_6px"])
+        # Legibility floors: the headline and the main button label stay readable.
+        out = get_pipeline("adaptive")(source, target)
+        sizes = {e["id"]: e["font_size"] for e in out["elements"] if e["type"] == "text"}
+        self.assertGreaterEqual(sizes["headline"], 10)
+        self.assertGreaterEqual(sizes["cta_label"], 9)
 
     def test_renaming_and_removing_notes_preserves_decisions(self):
         source = fixture()
@@ -182,7 +188,8 @@ class LayoutTests(unittest.TestCase):
             scale = group[0]["width"] / original[0]["width"]
             self.assertAlmostEqual(group[1]["x"] - group[0]["x"], 8 * scale)
             self.assertAlmostEqual(group[1]["y"] - group[0]["y"], 12 * scale)
-            self.assertAlmostEqual(group[1]["font_size"], 14 * scale)
+            # Labels paint at an integer size; the group box keeps the exact transform.
+            self.assertEqual(group[1]["font_size"], paint_size(14 * scale))
 
     def test_rotated_groups_and_missing_roles(self):
         source = dict(variants(fixture()))["rotated_groups"]
@@ -220,6 +227,7 @@ class RendererTests(unittest.TestCase):
 
     def test_measured_wrap_matches_converter_including_spacing_and_runs(self):
         import skia
+
         from renderer.converter.convert import convert_chameleon_to_crello
         for width in (70, 150, 500):
             el = fixture()["elements"][2]
@@ -257,6 +265,7 @@ class RendererTests(unittest.TestCase):
 
     def test_real_render_and_missing_asset_warning(self):
         from PIL import Image
+
         from renderer.converter.convert import render_design_to_png
         task = samples()[2]
         out = get_pipeline("flow")(task["source"], task["target_canvas"])

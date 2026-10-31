@@ -1,0 +1,25 @@
+# Keep the build context to what the image actually needs.
+# Runtime code dirs (engine/, pipelines/, renderer/, brand_kit/) and the schema are COPY'd explicitly.
+.git
+.gitignore
+.dockerignore
+.venv*
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+node_modules
+**/node_modules
+input
+output
+tests
+scripts
+webapp
+express-addon
+cr-renderer
+*.md
+!brand_kit/README.md
+requirements-dev.txt

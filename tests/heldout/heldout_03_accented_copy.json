@@ -1,0 +1,21 @@
+{
+  "task_id": "heldout_03",
+  "difficulty": "heldout",
+  "target_format": "youtube_thumb",
+  "notes": "Long multilingual copy with accents, umlauts and eszett on an A4 flyer, retargeted to a landscape thumbnail. Tests wrapping and measuring of non-ASCII glyphs and that a long body block still fits.",
+  "source": {
+    "canvas": {"width": 794, "height": 1123},
+    "elements": [
+      {"id": "bg", "type": "image", "x": 0, "y": 0, "width": 794, "height": 1123, "z_index": 0, "asset_id": "solstice_bg_gradient.png", "fit": "cover"},
+      {"id": "logo", "type": "image", "x": 297, "y": 48, "width": 200, "height": 67, "z_index": 3, "asset_id": "solstice_logo_lockup.png", "fit": "contain"},
+      {"id": "headline", "type": "text", "x": 60, "y": 150, "width": 674, "height": 120, "z_index": 3, "content": "Été éternel : l'élixir du solstice", "font_family": "Solstice Serif", "font_size": 44, "color": "rgba(255,255,255,1)", "font_weight": "bold", "text_align": "center"},
+      {"id": "deck", "type": "text", "x": 80, "y": 290, "width": 634, "height": 64, "z_index": 3, "content": "Sabores de verano, hechos a mano en Málaga y Zürich.", "font_family": "Solstice Serif", "font_size": 22, "color": "rgba(255,255,255,1)", "font_style": "italic", "text_align": "center"},
+      {"id": "body", "type": "text", "x": 70, "y": 380, "width": 654, "height": 200, "z_index": 3, "content": "Chaque bouteille réunit des agrumes mûris au soleil, une touche de fleur d'oranger et des bulles fines. Für die längsten Tage des Jahres: kühl servieren, mit Freunden teilen, langsam genießen. Ingrédients naturels, sans édulcorants artificiels, élaborés à la main avec soin.", "font_family": "Solstice Sans", "font_size": 18, "color": "rgba(255,255,255,0.92)", "line_height": 1.5},
+      {"id": "product", "type": "image", "x": 247, "y": 610, "width": 300, "height": 300, "z_index": 2, "asset_id": "solstice_bottle.png", "fit": "contain"},
+      {"id": "cta_bg", "type": "shape", "x": 247, "y": 940, "width": 300, "height": 60, "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(232,106,58,1)", "corner_radius": 30, "group_id": "cta"},
+      {"id": "cta_label", "type": "text", "x": 247, "y": 954, "width": 300, "height": 32, "z_index": 4, "content": "Découvrir la collection", "font_family": "Solstice Sans", "font_size": 20, "color": "rgba(255,255,255,1)", "font_weight": "bold", "text_align": "center", "group_id": "cta"},
+      {"id": "footer", "type": "text", "x": 60, "y": 1040, "width": 674, "height": 40, "z_index": 3, "content": "Disponible dès le 21 juin · Hergestellt in Österreich · Edición limitada", "font_family": "Solstice Sans", "font_size": 14, "color": "rgba(255,255,255,0.8)", "text_align": "center"}
+    ]
+  },
+  "target_canvas": {"width": 1280, "height": 720}
+}

@@ -1,2 +1,6 @@
-Pillow>=10.0
-git+https://github.com/CyberAgentAILab/cr-renderer
+# Runtime dependencies, installed at image build time (scoring runs with --network none).
+# Rendering-relevant packages are pinned so local previews and the scored container match.
+Pillow==13.0.0
+skia-python==144.1
+# cr-renderer has no releases; pin the exact upstream commit for reproducible builds.
+cr-renderer @ git+https://github.com/CyberAgentAILab/cr-renderer@a17e1fb9a732959dd6c21ae168d5ee09d74bd64f

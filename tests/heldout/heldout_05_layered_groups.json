@@ -1,0 +1,24 @@
+{
+  "task_id": "heldout_05",
+  "difficulty": "heldout",
+  "target_format": "pinterest_pin",
+  "notes": "Coincident group (panel and title share one box), a rotated price tag group overlapping the product, a stamp group overlapping the promo group, and semi-transparent scrim/glow shapes. Square to tall pin.",
+  "source": {
+    "canvas": {"width": 1080, "height": 1080},
+    "elements": [
+      {"id": "bg", "type": "image", "x": 0, "y": 0, "width": 1080, "height": 1080, "z_index": 0, "asset_id": "solstice_bg_gradient.png", "fit": "cover"},
+      {"id": "scrim", "type": "shape", "x": 0, "y": 0, "width": 1080, "height": 1080, "z_index": 1, "shape_type": "rectangle", "fill_color": "rgba(20,16,40,0.45)"},
+      {"id": "glow", "type": "shape", "x": 240, "y": 120, "width": 700, "height": 700, "z_index": 1, "shape_type": "ellipse", "fill_color": "rgba(255,255,255,1)", "opacity": 0.1},
+      {"id": "product", "type": "image", "x": 340, "y": 200, "width": 520, "height": 520, "z_index": 2, "asset_id": "solstice_bottle.png", "fit": "contain"},
+      {"id": "logo", "type": "image", "x": 60, "y": 60, "width": 270, "height": 90, "z_index": 4, "asset_id": "solstice_logo_lockup.png", "fit": "contain"},
+      {"id": "tag_disc", "type": "shape", "x": 700, "y": 180, "width": 200, "height": 200, "z_index": 4, "shape_type": "ellipse", "fill_color": "rgba(232,106,58,1)", "rotation": -12, "group_id": "price"},
+      {"id": "tag_price", "type": "text", "x": 700, "y": 236, "width": 200, "height": 64, "z_index": 5, "content": "$4.99", "font_family": "Solstice Serif", "font_size": 48, "color": "rgba(255,255,255,1)", "font_weight": "bold", "text_align": "center", "rotation": -12, "group_id": "price"},
+      {"id": "tag_unit", "type": "text", "x": 700, "y": 300, "width": 200, "height": 32, "z_index": 5, "content": "per can", "font_family": "Solstice Sans", "font_size": 18, "color": "rgba(255,255,255,1)", "text_align": "center", "rotation": -12, "group_id": "price"},
+      {"id": "promo_panel", "type": "shape", "x": 60, "y": 840, "width": 960, "height": 160, "z_index": 3, "shape_type": "rectangle", "fill_color": "rgba(255,255,255,0.18)", "corner_radius": 24, "group_id": "promo"},
+      {"id": "promo_title", "type": "text", "x": 60, "y": 840, "width": 960, "height": 160, "z_index": 4, "content": "Golden Hour Sale", "font_family": "Solstice Serif", "font_size": 72, "color": "rgba(255,255,255,1)", "font_weight": "bold", "text_align": "center", "group_id": "promo"},
+      {"id": "stamp_disc", "type": "shape", "x": 900, "y": 780, "width": 140, "height": 140, "z_index": 6, "shape_type": "ellipse", "fill_color": "rgba(232,106,58,0.85)", "rotation": -10, "group_id": "stamp"},
+      {"id": "stamp_label", "type": "text", "x": 900, "y": 828, "width": 140, "height": 44, "z_index": 7, "content": "-20%", "font_family": "Solstice Sans", "font_size": 30, "color": "rgba(255,255,255,1)", "font_weight": "bold", "text_align": "center", "rotation": -10, "group_id": "stamp"}
+    ]
+  },
+  "target_canvas": {"width": 1000, "height": 1500}
+}

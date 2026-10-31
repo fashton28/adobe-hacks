@@ -13,9 +13,9 @@ import math
 from typing import Any
 
 from pipelines.anchored.pipeline import resize as anchored_resize
-from pipelines.common.geometry import overlap_area, aabb
-from pipelines.common.text import fit_text, measure, text_height
-from pipelines.common.units import build_units, copy_design, place_bg, place_decor, place_rigid
+from pipelines.common.geometry import aabb, overlap_area
+from pipelines.common.text import fit_text, measure, paint_size
+from pipelines.common.units import build_units, copy_design, place_extras, place_rigid
 from pipelines.common.validate import is_background, validate
 
 K_MIN = 0.02
@@ -152,13 +152,7 @@ def _solve(solver, src, units, rect, gap, kcap):
 
 def _apply(src, target, units, placements, extras):
     out = copy_design(src, target)
-    for u in extras:
-        if u["kind"] == "bg":
-            place_bg(out, u)
     s_decor = min(target["width"] / src["canvas"]["width"], target["height"] / src["canvas"]["height"])
-    for u in extras:
-        if u["kind"] == "decor":
-            place_decor(out, src, u, s_decor)
     for p in placements:
         if p[0] == "rigid":
             _, u, s, x, y = p
@@ -167,9 +161,10 @@ def _apply(src, target, units, placements, extras):
             _, u, x, y, w, h, size = p
             o, m = out["elements"][u["idx"][0]], src["elements"][u["idx"][0]]
             o["x"], o["y"], o["width"], o["height"] = x, y, w, h
-            o["font_size"] = size
+            o["font_size"] = paint_size(size)
             if m.get("letter_spacing"):
-                o["letter_spacing"] = m["letter_spacing"] * size / m["font_size"]
+                o["letter_spacing"] = m["letter_spacing"] * o["font_size"] / m["font_size"]
+    place_extras(out, src, extras, s_decor)
     return out
 
 
@@ -184,9 +179,8 @@ def _score(src, out) -> float:
             weights.append(m["width"] * m["height"] + 1)
         elif o["type"] == "image" and not is_background(m, src["canvas"]) and m["width"]:
             img.append((min(1.5, max(0.01, o["width"] / m["width"])), m["width"] * m["height"]))
-        if o["type"] != "shape" or o.get("group_id"):
-            if not is_background(m, src["canvas"]):
-                boxes.append((o.get("group_id") or o["id"], aabb(o)))
+        if (o["type"] != "shape" or o.get("group_id")) and not is_background(m, src["canvas"]):
+            boxes.append((o.get("group_id") or o["id"], aabb(o)))
     text_term = 0.0
     if ratios:
         wmean = sum(w * math.log(r) for r, w in zip(ratios, weights)) / sum(weights)
@@ -204,7 +198,7 @@ def _candidates(src, target):
     W, H = target["width"], target["height"]
     Ws, Hs = src["canvas"]["width"], src["canvas"]["height"]
     units = build_units(src)
-    extras = [u for u in units if u["kind"] in ("bg", "decor")]
+    extras = units
     content = [u for u in units if u["kind"] in ("text", "rigid")]
     if not content:
         return

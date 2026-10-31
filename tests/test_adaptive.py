@@ -4,9 +4,9 @@ import contextlib
 import copy
 import io
 import json
+import shutil
 import subprocess
 import sys
-import shutil
 import unittest
 import uuid
 from pathlib import Path
@@ -15,9 +15,10 @@ from unittest.mock import patch
 from pipelines import get_pipeline
 from pipelines.adaptive.pipeline import search
 from pipelines.common.quality import metrics
-from pipelines.common.text import measure, _measure_uncached
+from pipelines.common.text import _measure_uncached, measure
 from pipelines.common.validate import validate
-from scripts.run_matrix import main as matrix_main, variants
+from scripts.run_matrix import main as matrix_main
+from scripts.run_matrix import variants
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,7 +53,10 @@ class AdaptiveTests(unittest.TestCase):
             updated = dict(el, **change)
             for size in (0.75, 9.5, 21, 32.25):
                 for width in (60, 160, 600):
-                    self.assertEqual(measure(updated, size, width), _measure_uncached(updated, size, width))
+                    lines, widest = measure(updated, size, width)
+                    expected_lines, expected_widest = _measure_uncached(updated, size, width)
+                    self.assertEqual(lines, expected_lines)
+                    self.assertAlmostEqual(widest, expected_widest, places=9)
 
     def test_nearby_ratio_keeps_source_vertical_arrangement(self):
         task = json.loads((ROOT / "input/chameleon_sample_level1_warmup.json").read_text())

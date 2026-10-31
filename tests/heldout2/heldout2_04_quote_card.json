@@ -1,0 +1,128 @@
+{
+  "task_id": "heldout2_04",
+  "difficulty": "level_2_core",
+  "difficulty_label": "Level 2 - Core",
+  "notes": "Testimonial quote card (1080x1080, light background) to Instagram / TikTok Story 1080x1920 (9:16). Stresses a long left-aligned italic serif quote with generous line height, an oversized decorative quote glyph, an attribution group (accent line, name, role), dark text on a solid cream canvas-sized shape, and a plum footer band carrying the white logo that must stay legible.",
+  "source": {
+    "canvas": {
+      "width": 1080,
+      "height": 1080
+    },
+    "elements": [
+      {
+        "id": "bg",
+        "type": "shape",
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 1080,
+        "z_index": 0,
+        "shape_type": "rectangle",
+        "fill_color": "rgba(250,243,232,1)"
+      },
+      {
+        "id": "footer_band",
+        "type": "shape",
+        "x": 0,
+        "y": 900,
+        "width": 1080,
+        "height": 180,
+        "z_index": 1,
+        "shape_type": "rectangle",
+        "fill_color": "rgba(43,27,46,1)"
+      },
+      {
+        "id": "logo",
+        "type": "image",
+        "x": 420,
+        "y": 940,
+        "width": 240,
+        "height": 80,
+        "z_index": 3,
+        "asset_id": "solstice_logo_lockup.png",
+        "fit": "contain"
+      },
+      {
+        "id": "quote_mark",
+        "type": "text",
+        "x": 100,
+        "y": 40,
+        "width": 200,
+        "height": 220,
+        "z_index": 2,
+        "content": "“",
+        "font_family": "Solstice Serif",
+        "font_size": 240,
+        "font_weight": "bold",
+        "color": "rgba(232,106,58,1)",
+        "text_align": "left",
+        "opacity": 0.9
+      },
+      {
+        "id": "quote",
+        "type": "text",
+        "x": 120,
+        "y": 230,
+        "width": 840,
+        "height": 390,
+        "z_index": 3,
+        "content": "The first sip tasted like the last warm evening of summer, bottled and saved for whenever I need it most. I have never had a drink that felt so much like a memory.",
+        "font_family": "Solstice Serif",
+        "font_size": 50,
+        "font_weight": "regular",
+        "color": "rgba(43,27,46,1)",
+        "text_align": "left",
+        "font_style": "italic",
+        "line_height": 1.3
+      },
+      {
+        "id": "attr_rule",
+        "type": "shape",
+        "x": 120,
+        "y": 640,
+        "width": 80,
+        "height": 4,
+        "z_index": 3,
+        "shape_type": "line",
+        "fill_color": "rgba(232,106,58,1)",
+        "group_id": "attribution"
+      },
+      {
+        "id": "attr_name",
+        "type": "text",
+        "x": 120,
+        "y": 668,
+        "width": 600,
+        "height": 40,
+        "z_index": 3,
+        "content": "Maya Okafor",
+        "font_family": "Solstice Sans",
+        "font_size": 32,
+        "font_weight": "bold",
+        "color": "rgba(43,27,46,1)",
+        "text_align": "left",
+        "group_id": "attribution"
+      },
+      {
+        "id": "attr_role",
+        "type": "text",
+        "x": 120,
+        "y": 714,
+        "width": 600,
+        "height": 34,
+        "z_index": 3,
+        "content": "Food Editor, The Coastal Table",
+        "font_family": "Solstice Sans",
+        "font_size": 24,
+        "font_weight": "regular",
+        "color": "rgba(43,27,46,0.7)",
+        "text_align": "left",
+        "group_id": "attribution"
+      }
+    ]
+  },
+  "target_canvas": {
+    "width": 1080,
+    "height": 1920
+  }
+}

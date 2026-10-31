@@ -6,8 +6,8 @@ Reports are development proxies, not official challenge scores.
 
 import argparse
 import copy
-import html
 import hashlib
+import html
 import importlib.metadata
 import importlib.util
 import json
@@ -17,15 +17,10 @@ import time
 from pathlib import Path
 
 from pipelines import PIPELINES, get_pipeline
-from pipelines.common.quality import metrics, score
+from pipelines.common.formats import TARGETS
+from pipelines.common.quality import BACKDROP_SLACK, EMPTY_GROWTH, metrics, score
 from pipelines.common.validate import validate
 
-TARGETS = {
-    "instagram_post": (1080, 1080), "instagram_portrait": (1080, 1350), "story": (1080, 1920),
-    "youtube_thumb": (1280, 720), "facebook_cover": (1640, 624), "twitter_header": (1500, 500),
-    "banner_wide": (1600, 400), "leaderboard": (728, 90), "skyscraper": (160, 600),
-    "medium_rect": (300, 250), "a4_portrait": (794, 1123),
-}
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -42,6 +37,10 @@ def summarize(records):
             "quality_failures": sum(bool(r.get("quality_problems")) for r in rows),
             "overflow_cases": sum(r["metrics"]["text_overflows"] > 0 for r in measured),
             "overlap_cases": sum(r["metrics"]["overlap_pairs"] > 0 for r in measured),
+            "fidelity_cases": sum(r["metrics"].get("fidelity_violations", 0) > 0 for r in measured),
+            "backdrop_cases": sum(r["metrics"]["backdrop_shortfall"] > BACKDROP_SLACK for r in measured),
+            "empty_canvas_cases": sum(r["metrics"]["empty_output"] - r["metrics"]["empty_source"] > EMPTY_GROWTH
+                                      for r in measured),
             "below_6px": sum(r["metrics"]["below_6px"] for r in measured),
             "below_10px": sum(r["metrics"]["below_10px"] for r in measured),
             "worst_min_font": min((r["metrics"]["min_font"] for r in text_rows), default=None),
@@ -82,13 +81,14 @@ def write_html(outdir, records, sources):
         return html.escape(str(value), quote=True)
 
     parts = ["<!doctype html><html><meta charset='utf-8'><title>Pipeline comparison</title>",
-             "<style>body{font:15px system-ui;margin:24px;background:#f5f5f5}"
-             "section{margin:24px 0}.cases{display:flex;flex-wrap:wrap;gap:16px}"
-             "article{background:white;padding:12px;width:340px}"
-             "img{max-width:100%;max-height:300px;object-fit:contain}"
-             "pre{white-space:pre-wrap}.bad{color:#a00}</style>",
-             "<h1>Pipeline comparison</h1><p>Local proxies; not official scores. "
-             "Click a PNG to inspect native resolution. Missing-asset warnings are retained.</p>"]
+             ("<style>body{font:15px system-ui;margin:24px;background:#f5f5f5}"
+              "section{margin:24px 0}.cases{display:flex;flex-wrap:wrap;gap:16px}"
+              "article{background:white;padding:12px;width:340px}"
+              "img{max-width:100%;max-height:300px;object-fit:contain}"
+              "pre{white-space:pre-wrap}.bad{color:#a00}</style>"),
+             ("<h1>Pipeline comparison</h1><p>Local proxies; not official scores. "
+              "Click a PNG to inspect native resolution. Missing assets render as the "
+              "official placeholder box and are listed as warnings.</p>")]
     keys = list(dict.fromkeys((r["source"], r["target"]) for r in records))
     for source, target in keys:
         parts.append(f"<section><h2>{esc(source)} / {esc(target)}</h2><div class='cases'>")
@@ -103,8 +103,11 @@ def write_html(outdir, records, sources):
             q = r.get("metrics", {})
             parts.append(f"<p>Score {r.get('score', 0):.2f}; {r['elapsed_ms']:.0f} ms<br>"
                          f"Minimum font {q.get('min_font', 0):.1f}px; below 6px: {q.get('below_6px', 0)}<br>"
-                         f"Text overflows: {q.get('text_overflows', 0)}; overlaps: {q.get('overlap_pairs', 0)}</p>")
-            parts.append(f"<p>Source arrangement shift: {q.get('layout_shift', 0):.3f}</p>")
+                         f"Text overflows: {q.get('text_overflows', 0)}; overlaps: {q.get('overlap_pairs', 0)}; "
+                         f"fidelity violations: {q.get('fidelity_violations', 0)}</p>")
+            parts.append(f"<p>Source arrangement shift: {q.get('layout_shift', 0):.3f}<br>"
+                         f"Backdrop coverage: {q.get('backdrop_coverage') if q.get('backdrop_coverage') is None else format(q['backdrop_coverage'], '.0%')}; "
+                         f"empty canvas: {q.get('empty_output', 0):.0%} (source {q.get('empty_source', 0):.0%})</p>")
             if r["problems"] or r.get("quality_problems"):
                 parts.append(f"<pre class='bad'>{esc('; '.join(r['problems'] + r.get('quality_problems', [])))}</pre>")
             if r.get("search"):
@@ -128,8 +131,11 @@ def main(argv=None) -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("output/matrix"))
     parser.add_argument("--variants", action="store_true")
     parser.add_argument("--include-source", action="store_true", help="Also test the original canvas")
+    parser.add_argument("--task-only", action="store_true",
+                        help="Only each task's requested target (plus the source canvas with --include-source)")
     parser.add_argument("--check-determinism", action="store_true")
-    parser.add_argument("--strict-quality", action="store_true", help="Fail for text overflow or unrelated unit overlap")
+    parser.add_argument("--strict-quality", action="store_true",
+                        help="Fail for text overflow, unrelated unit overlap, a lost backdrop or a mostly empty canvas")
     parser.add_argument("--schema", action="store_true", help="Validate the supplied JSON schema (requirements-dev.txt)")
     parser.add_argument("--min-font", type=float, default=0, help="Optional readability gate in pixels; not an official threshold")
     parser.add_argument("--reference-pipelines", nargs="*", choices=sorted(PIPELINES), default=["stretch"],
@@ -152,7 +158,7 @@ def main(argv=None) -> int:
         from renderer.converter.convert import render_design_to_png
         render = render_design_to_png
     records, source_pngs, bad = [], {}, 0
-    print(f"{'source':42} {'target':18} {'pipeline':10} {'score':>7} {'min px':>7} {'<6':>3} {'clip':>4} {'ovlp':>4} {'ms':>7}  problems", flush=True)
+    print(f"{'source':42} {'target':18} {'pipeline':10} {'score':>7} {'min px':>7} {'<6':>3} {'clip':>4} {'ovlp':>4} {'fid':>4} {'ms':>7}  problems", flush=True)
     for path in files:
         task = json.loads(path.read_text(encoding="utf-8"))
         src = task["source"]
@@ -167,7 +173,7 @@ def main(argv=None) -> int:
                 source_pngs[tag] = source_png
             source_json = f"{tag}_source.json"
             (args.output_dir / source_json).write_text(json.dumps(source, indent=2, allow_nan=False), encoding="utf-8")
-            targets = {name: TARGETS[name] for name in args.targets}
+            targets = {} if args.task_only else {name: TARGETS[name] for name in args.targets}
             # Always include the task's actual requested target, even if the
             # development catalogue changes or a fixture uses another size.
             task_target = task.get("target_canvas")
@@ -211,6 +217,12 @@ def main(argv=None) -> int:
                                 r["quality_problems"].append("text overflow")
                             if q["overlap_pairs"]:
                                 r["quality_problems"].append("unrelated unit overlap")
+                            if q["backdrop_shortfall"] > BACKDROP_SLACK:
+                                r["quality_problems"].append(
+                                    f"backdrop covers {q['backdrop_coverage']:.0%} of the canvas")
+                            if q["empty_output"] - q["empty_source"] > EMPTY_GROWTH:
+                                r["quality_problems"].append(
+                                    f"empty canvas {q['empty_output']:.0%} vs {q['empty_source']:.0%} in source")
                         if q["texts"] and q["min_font"] < args.min_font:
                             r["quality_problems"].append(f"font below {args.min_font:g}px")
                         stem = f"{tag}_{tname}_{name}"
@@ -224,7 +236,7 @@ def main(argv=None) -> int:
                                 r["render_size"] = list(png.size)
                             if r["render_size"] != [w, h]:
                                 r["problems"].append("render dimensions differ from target")
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - one broken case must not abort the report
                         r["elapsed_ms"] = (time.perf_counter() - started) * 1000
                         r["problems"].append(f"{type(exc).__name__}: {exc}")
                     finally:
@@ -234,7 +246,7 @@ def main(argv=None) -> int:
                     records.append(r)
                     print(f"{tag:42} {tname:18} {name:10} {r.get('score', 0):7.2f} {q.get('min_font', 0):7.2f} "
                           f"{q.get('below_6px', 0):3} {q.get('text_overflows', 0):4} {q.get('overlap_pairs', 0):4} "
-                          f"{r['elapsed_ms']:7.0f}  {'; '.join((r['problems'] + r['quality_problems'])[:2])}", flush=True)
+                          f"{q.get('fidelity_violations', 0):4} {r['elapsed_ms']:7.0f}  {'; '.join((r['problems'] + r['quality_problems'])[:2])}", flush=True)
     report = {"python": platform.python_version(), "platform": platform.platform(),
               "real_renderer": bool(render), "schema_checked": bool(schema_validator),
               "gates": {"strict_quality": args.strict_quality, "min_font": args.min_font,
