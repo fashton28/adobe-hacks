@@ -21,13 +21,11 @@ layout keeps them together in an even grid.
 import copy
 import re
 
-from .geometry import aabb, union
-from .validate import is_background
+from .geometry import aabb, extent, union
+from .validate import BAND_SPAN, EDGE, edge_band, is_background
 
 BACKDROP_COVER = 0.85  # fraction of the source canvas a backdrop covers
 PANEL_COVER = 0.25  # inset sheets behind most of the copy
-BAND_SPAN = 0.9  # edge bands span this fraction of one canvas side
-EDGE = 0.02  # "touches the edge" tolerance, as a fraction of that side
 FOLLOW_AREA = 4.0  # a following decoration is at most this many times the unit's area
 
 
@@ -100,16 +98,6 @@ def is_backdrop(el: dict, canvas: dict) -> bool:
     return el["type"] == "shape" and coverage(aabb(el), canvas) >= BACKDROP_COVER
 
 
-def _band(el: dict, canvas: dict) -> bool:
-    """A rectangle/line spanning one side of the canvas along an edge."""
-    x0, y0, x1, y1 = aabb(el)
-    W, H = canvas["width"], canvas["height"]
-    wide = min(x1, W) - max(x0, 0) >= BAND_SPAN * W
-    tall = min(y1, H) - max(y0, 0) >= BAND_SPAN * H
-    return ((wide and (y0 <= EDGE * H or y1 >= (1 - EDGE) * H))
-            or (tall and (x0 <= EDGE * W or x1 >= (1 - EDGE) * W)))
-
-
 def _inside(inner, outer, slack=0.0) -> bool:
     return (inner[0] >= outer[0] - slack and inner[1] >= outer[1] - slack
             and inner[2] <= outer[2] + slack and inner[3] <= outer[3] + slack)
@@ -175,11 +163,19 @@ def build_units(source: dict) -> list[dict]:
             by_group.setdefault(gid, []).append(i)
         else:
             units.append({"idx": [i]})
-    units += [{"idx": idx} for idx in by_group.values()]
+    for idx in by_group.values():
+        # An edge band inside a group (a footer strip behind a logo) frames
+        # the canvas: it becomes its own band, carrying the rest.
+        bands = [i for i in idx if len(idx) > 1 and edge_band(els[i], canvas)]
+        units += [{"idx": [i]} for i in bands]
+        rest = [i for i in idx if i not in bands]
+        if rest:
+            units.append({"idx": rest})
 
     for u in units:
         members = [els[i] for i in u["idx"]]
-        u["bbox"] = union(aabb(m) for m in members)
+        # The full extent (rotated bounds and unrotated box) is what must stay on canvas.
+        u["bbox"] = union(extent(m) for m in members)
         u["ink"] = union(ink_box(m) for m in members)
         if len(members) == 1:
             m = members[0]
@@ -190,8 +186,7 @@ def build_units(source: dict) -> list[dict]:
                 u["kind"] = "bg"
             elif m["type"] == "text":
                 u["kind"] = "text"
-            elif (m["type"] == "shape" and not m.get("rotation", 0)
-                  and m.get("shape_type") in ("rectangle", "line") and _band(m, canvas)):
+            elif edge_band(m, canvas):
                 u["kind"], u["panel"] = "panel", "band"
             elif m["type"] == "shape" and (bleeds or translucent and m.get("shape_type") != "line"):
                 # Rules and dividers stay structural even when tinted.
@@ -216,6 +211,7 @@ def build_units(source: dict) -> list[dict]:
                    and els[v["idx"][0]].get("z_index", v["idx"][0]) >= z]
         if len(covered) >= 2:
             u["kind"], u["panel"] = "panel", "sheet"
+    units = _attach_stickers(source, units)
     content = [u for u in units if u["kind"] in ("text", "rigid")]
     # A translucent shape wrapped tightly around one content unit (a glow or
     # halo behind a product) travels with that unit instead of the canvas.
@@ -229,18 +225,92 @@ def build_units(source: dict) -> list[dict]:
         for j, v in enumerate(units):
             if v["kind"] not in ("text", "rigid"):
                 continue
-            inner = _area(v["bbox"])
+            vb = v.get("core_bbox", v["bbox"])  # a glow follows the product, not its sticker
+            inner = _area(vb)
             if inner <= 0 or _area(u["bbox"]) > FOLLOW_AREA * inner:
                 continue
-            ox = max(0.0, min(x1, v["bbox"][2]) - max(x0, v["bbox"][0]))
-            oy = max(0.0, min(y1, v["bbox"][3]) - max(y0, v["bbox"][1]))
+            ox = max(0.0, min(x1, vb[2]) - max(x0, vb[0]))
+            oy = max(0.0, min(y1, vb[3]) - max(y0, vb[1]))
             share = ox * oy / inner
             if share >= 0.6 and (best is None or share > best[0]):
                 best = (share, j)
         if best is not None:
             u["follow"] = best[1]
     _assign_sets(source, units)
+    _assign_carriers(source, units)
     return units
+
+
+def _z(source, u) -> float:
+    return min(source["elements"][i].get("z_index", i) for i in u["idx"])
+
+
+STICKER_OVERLAP = (0.15, 0.95)  # share of a sticker's box lying on its host
+STICKER_AREA = 0.5  # a sticker is at most this share of its host's area
+
+
+def _attach_stickers(source, units):
+    """Merge each sticker into the unit it overlaps (a badge on a product corner).
+
+    A sticker is a rigid unit with a shape (a badge, stamp or tag group)
+    whose box lies partly, not wholly, on a larger rigid unit below it. The
+    merged unit moves and scales as one, so the callout stays attached at
+    the same relative spot. The host's own members are kept as the `core`
+    (artwork scale, followers and prominence follow the host only).
+    """
+    els = source["elements"]
+    rigid = [u for u in units if u["kind"] == "rigid"]
+    absorbed, hosts = set(), {}
+    for a in sorted(rigid, key=lambda u: (_area(u["bbox"]), min(u["idx"]))):
+        if not any(els[i]["type"] == "shape" for i in a["idx"]) or id(a) in hosts:
+            continue
+        best = None
+        for b in rigid:
+            if b is a or id(b) in absorbed or _area(a["bbox"]) > STICKER_AREA * _area(b["bbox"]):
+                continue
+            if _z(source, a) <= max(els[i].get("z_index", i) for i in b["idx"]):
+                continue  # a sticker paints above its whole host
+            ox = max(0.0, min(a["bbox"][2], b["bbox"][2]) - max(a["bbox"][0], b["bbox"][0]))
+            oy = max(0.0, min(a["bbox"][3], b["bbox"][3]) - max(a["bbox"][1], b["bbox"][1]))
+            share = ox * oy / max(_area(a["bbox"]), 1e-9)
+            if STICKER_OVERLAP[0] <= share <= STICKER_OVERLAP[1] and (best is None or share > best[0]):
+                best = (share, b)
+        if best is not None:
+            absorbed.add(id(a))
+            hosts.setdefault(id(best[1]), (best[1], []))[1].append(a)
+    if not hosts:
+        return units
+    merged = []
+    for u in units:
+        if id(u) in absorbed:
+            continue
+        if id(u) in hosts:
+            host, stickers = hosts[id(u)]
+            parts = [host, *stickers]
+            u = {"idx": sorted(i for p in parts for i in p["idx"]), "kind": "rigid",
+                 "bbox": union(p["bbox"] for p in parts), "ink": union(p["ink"] for p in parts),
+                 "core_idx": list(host["idx"]), "core_bbox": host["bbox"], "core_ink": host["ink"],
+                 "art": False, "images_only": False, "core_art": host["art"]}
+        merged.append(u)
+    return merged
+
+
+def _assign_carriers(source, units):
+    """Panels (edge bands, sheets) record the content units sitting on them.
+
+    A unit is carried when its centre lies on the panel and it paints above
+    it: a white logo on a dark footer band, copy on a scrim. Layouts keep
+    carried content inside its panel (contrast depends on it).
+    """
+    for p in units:
+        if p["kind"] != "panel":
+            continue
+        px0, py0, px1, py1 = p["bbox"]
+        z = _z(source, p)
+        p["carries"] = [j for j, u in enumerate(units)
+                        if u["kind"] in ("text", "rigid") and _z(source, u) >= z
+                        and px0 <= (u["bbox"][0] + u["bbox"][2]) / 2 <= px1
+                        and py0 <= (u["bbox"][1] + u["bbox"][3]) / 2 <= py1]
 
 
 def copy_design(source: dict, target: dict) -> dict:
@@ -276,8 +346,8 @@ def place_rigid(out: dict, src: dict, unit: dict, s: float, tx: float, ty: float
 
 
 def clamp_unit(out: dict, unit: dict) -> None:
-    """Translate all members together so rotated bounds stay on canvas."""
-    x0, y0, x1, y1 = union(aabb(out["elements"][i]) for i in unit["idx"])
+    """Translate all members together so rotated bounds and unrotated boxes stay on canvas."""
+    x0, y0, x1, y1 = union(extent(out["elements"][i]) for i in unit["idx"])
     W, H = out["canvas"]["width"], out["canvas"]["height"]
     dx = max(0, -x0) - max(0, x1 - W)
     dy = max(0, -y0) - max(0, y1 - H)
@@ -301,14 +371,19 @@ def panel_box(src: dict, unit: dict, W: float, H: float) -> tuple[float, float, 
     """
     Ws, Hs = src["canvas"]["width"], src["canvas"]["height"]
     s = min(W / Ws, H / Hs)
-    x0, y0, x1, y1 = unit["bbox"]
-    x0, y0, x1, y1 = max(0.0, x0), max(0.0, y0), min(Ws, x1), min(Hs, y1)
+    raw = unit["bbox"]
+    # Clamp each axis as an interval: a band lying wholly outside the source
+    # canvas must not invert into a negative width or height.
+    x0 = min(max(0.0, raw[0]), Ws)
+    y0 = min(max(0.0, raw[1]), Hs)
+    x1, y1 = max(x0, min(Ws, raw[2])), max(y0, min(Hs, raw[3]))
     box = [x0 / Ws * W, y0 / Hs * H, x1 / Ws * W, y1 / Hs * H]
     if unit.get("panel") == "band":
         for axis, (a0, a1, side, size) in enumerate(((x0, x1, Ws, W), (y0, y1, Hs, H))):
             if a1 - a0 >= BAND_SPAN * side:
                 continue
-            thick = min((a1 - a0) * s, size)
+            # Thickness keeps the band's own size, even where it bled off canvas.
+            thick = min((raw[axis + 2] - raw[axis]) * s, size)
             if a0 <= EDGE * side:
                 lo = 0.0
             elif a1 >= (1 - EDGE) * side:
@@ -348,8 +423,8 @@ def place_decor(out: dict, src: dict, unit: dict, s: float) -> None:
 def place_follower(out: dict, src: dict, unit: dict, leader: dict) -> None:
     """Move a decoration with the content unit it surrounds (already placed in `out`)."""
     W, H = out["canvas"]["width"], out["canvas"]["height"]
-    lx0, ly0, lx1, ly1 = leader["bbox"]
-    nx0, ny0, nx1, ny1 = union(aabb(out["elements"][i]) for i in leader["idx"])
+    lx0, ly0, lx1, ly1 = leader.get("core_bbox", leader["bbox"])
+    nx0, ny0, nx1, ny1 = union(extent(out["elements"][i]) for i in leader.get("core_idx", leader["idx"]))
     s = min((nx1 - nx0) / max(lx1 - lx0, 1e-9), (ny1 - ny0) / max(ly1 - ly0, 1e-9))
     x0, y0, x1, y1 = unit["bbox"]
     bw, bh = (x1 - x0) * s, (y1 - y0) * s
@@ -377,3 +452,68 @@ def place_extras(out: dict, src: dict, units: list[dict], s: float) -> None:
                 place_follower(out, src, u, leader)
             else:
                 place_decor(out, src, u, s)
+                _clear_slivers(out, src, units, u)
+
+
+SLIVER = (0.5, 0.98)  # hidden share of a decoration that would leave only slivers visible
+
+
+def _opaque_boxes(out, src, units, z):
+    """Painted boxes of opaque shape content above paint order `z`."""
+    boxes = []
+    for v in units:
+        if v["kind"] not in ("text", "rigid"):
+            continue
+        for i in v["idx"]:
+            m = src["elements"][i]
+            if (m["type"] == "shape" and fill_alpha(m) >= 1 and m.get("opacity", 1) >= 1
+                    and m.get("z_index", i) > z):
+                boxes.append(aabb(out["elements"][i]))
+    return boxes
+
+
+def _hidden(box, boxes):
+    area = max(1e-9, (box[2] - box[0]) * (box[3] - box[1]))
+    covered = 0.0
+    for b in boxes:
+        w = min(box[2], b[2]) - max(box[0], b[0])
+        h = min(box[3], b[3]) - max(box[1], b[1])
+        if w > 0 and h > 0:
+            covered += w * h
+    return min(1.0, covered / area)
+
+
+def _clear_slivers(out, src, units, u):
+    """Move a decoration that would peek out from under a button as thin slivers.
+
+    When most but not all of it is hidden under opaque content, it slides by
+    the smallest step (staying on canvas) that clears that content, or, if
+    no slide works, centres fully under the largest cover it fits under.
+    """
+    W, H = out["canvas"]["width"], out["canvas"]["height"]
+    z = min(src["elements"][i].get("z_index", i) for i in u["idx"])
+    boxes = _opaque_boxes(out, src, units, z)
+    if not boxes:
+        return
+    box = union(aabb(out["elements"][i]) for i in u["idx"])
+    if not SLIVER[0] < _hidden(box, boxes) < SLIVER[1]:
+        return
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    hit = [b for b in boxes if min(box[2], b[2]) > max(box[0], b[0]) and min(box[3], b[3]) > max(box[1], b[1])]
+    x0, y0, x1, y1 = union(hit)
+    moves = [(x0 - box[2], 0.0), (x1 - box[0], 0.0), (0.0, y0 - box[3]), (0.0, y1 - box[1])]
+    best = None
+    for dx, dy in moves:
+        moved = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+        if moved[0] < 0 or moved[1] < 0 or moved[2] > W or moved[3] > H or _hidden(moved, boxes) > 0:
+            continue
+        if best is None or abs(dx) + abs(dy) < abs(best[0]) + abs(best[1]):
+            best = (dx, dy)
+    if best is None:
+        cover = max(hit, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+        if bw > cover[2] - cover[0] or bh > cover[3] - cover[1]:
+            return
+        best = ((cover[0] + cover[2] - bw) / 2 - box[0], (cover[1] + cover[3] - bh) / 2 - box[1])
+    for i in u["idx"]:
+        out["elements"][i]["x"] += best[0]
+        out["elements"][i]["y"] += best[1]

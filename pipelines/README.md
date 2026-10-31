@@ -67,7 +67,7 @@ The rules are geometric and never read ids, names or annotations.
 | `panel` (sheet) | Ungrouped, unrotated opaque rectangle covering at least 25% of the canvas with two or more content units on top of it. | Mapped to the matching target region (relative margins kept); when it holds all copy, layout happens inside it. |
 | `decor` | Ungrouped translucent (opacity or fill alpha below 1) or bleeding shape, except dividers (`line` shapes). | Anchored to its relative spot and clamped on-canvas, or, when it tightly wraps one content unit (at most 4x its area, covering 60% of it), moved and scaled with that unit (`follow`). |
 | `text` | Ungrouped text. | Re-fitted: integer font size, wrapped, box hugging the wrapped copy. |
-| `rigid` | Images, shape art and explicit groups. | One uniform transform. Units with the same member types, similar size and a shared row or column in the source form a `set` that is laid out as an even grid (all in one row, or equal rows; never 2 + 1 for three). |
+| `rigid` | Images, shape art and explicit groups (a sticker overlapping a larger unit is merged into it). | One uniform transform. Units with the same member types, similar size and a shared row or column in the source form a `set` that is laid out as an even grid (all in one row, or equal rows; never 2 + 1 for three). |
 
 Layout sizes use painted bounds (`ink_box`): transparent padding of packaged art and the empty part of a text box do not take space.
 The full element box may overlap neighbours where it only holds transparent pixels, but it never leaves the canvas; art that would cross an edge shrinks about its centre, by one shared factor across a set.
@@ -79,6 +79,14 @@ The full element box may overlap neighbours where it only holds transparent pixe
 - Footers: an ungrouped text block in the bottom 10% of the source may use a full-width footer band, sized on the body's own type scale so it never outgrows the copy above.
 - Rows land near their source positions (isotonic regression); on very different aspect ratios gaps are bounded so copy reads as one block.
 - A lone unit in a row or column shrinks to fit rather than blocking the shared type scale, so a wide card cannot make every headline tiny.
+
+## Design-quality rules (round 3, `common/policy.py`)
+- Safe margins and block gaps come from `policy.spacing`; artwork prominence bands from `policy.art_band`; anchoring strength from `policy.anchor_weight`. Generators and `quality` share these numbers.
+- Legibility floors per role (headline, main button label, other copy, tertiary copy) are tried in tiers by `adaptive` when uniform scaling would paint copy below 10px (`reflow.floors_for`).
+- One-label components (buttons, pills, badges) share one scale, capped relative to the headline and the short side.
+- `units.build_units` splits edge bands out of groups, merges stickers into the unit they overlap (`core_idx` keeps the host), and records the content each panel carries; `reflow` adds carrier layouts that keep that content inside the panel strip.
+- Content reads in row-first XY-cut order; stacks share one alignment axis; text is line-balanced; set rows are spaced apart; decorations avoid sliver occlusion; missing-asset placeholders hide under an opaque cover when possible.
+- Every element's unrotated box and rotated bounds stay on canvas (`geometry.extent`), and `adaptive.search` never raises for a usable input.
 
 ## Typography and the renderer
 - The converter wraps at the JSON font size and cr-renderer paints at `int(font_size)`; the engine emits integer sizes (`text.paint_size`, floor, never below 1), so wrapping and painting use the same size.

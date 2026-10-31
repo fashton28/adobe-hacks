@@ -3,10 +3,29 @@
 import math
 from collections import Counter
 
-from .geometry import aabb
+from .geometry import aabb, extent
 
 EPS = 0.5
 RATIO_TOL = 0.05
+BAND_SPAN = 0.9  # edge bands span this fraction of one canvas side
+EDGE = 0.02  # "touches the edge" tolerance, as a fraction of that side
+
+
+def edge_band(el: dict, canvas: dict) -> bool:
+    """An unrotated rectangle or line spanning one side of the canvas along an edge.
+
+    Such a band frames the canvas (a footer strip, a side scrim); it stretches
+    with the canvas even inside an explicit group, whose other members keep
+    one shared transform.
+    """
+    if el.get("type") != "shape" or el.get("rotation", 0) or el.get("shape_type") not in ("rectangle", "line"):
+        return False
+    x0, y0, x1, y1 = aabb(el)
+    W, H = canvas["width"], canvas["height"]
+    wide = min(x1, W) - max(x0, 0) >= BAND_SPAN * W
+    tall = min(y1, H) - max(y0, 0) >= BAND_SPAN * H
+    return ((wide and (y0 <= EDGE * H or y1 >= (1 - EDGE) * H))
+            or (tall and (x0 <= EDGE * W or x1 >= (1 - EDGE) * W)))
 
 
 def validate_input(source: dict, target: dict) -> None:
@@ -33,7 +52,7 @@ def validate_input(source: dict, target: dict) -> None:
                 raise ValueError(f"{el['id']}: {key} must be finite")
         if el["width"] < 0 or el["height"] < 0:
             raise ValueError(f"{el['id']}: negative dimensions")
-        if el.get("type") == "text" and (el["font_size"] < 1 or el.get("line_height", 1.2) <= 0):
+        if el.get("type") == "text" and el["font_size"] < 1:
             raise ValueError(f"{el['id']}: invalid typography")
 
 
@@ -90,7 +109,8 @@ def validate(source: dict, target: dict, out: dict) -> list[str]:
             problems.append(f"{el['id']}: negative size / font < 1")
         if any(s[key] > 0 and el[key] == 0 for key in ("width", "height")):
             problems.append(f"{el['id']}: visible element collapsed")
-        x0, y0, x1, y1 = aabb(el)
+        # Both the rotated bounds and the unrotated x/y/width/height box.
+        x0, y0, x1, y1 = extent(el)
         if x0 < -EPS or y0 < -EPS or x1 > W + EPS or y1 > H + EPS:
             problems.append(f"{el['id']}: off-canvas")
         if (el["type"] == "image" and not is_background(s, source["canvas"]) and s["height"] and s["width"]
@@ -105,6 +125,11 @@ def validate(source: dict, target: dict, out: dict) -> list[str]:
     for s in source["elements"]:
         if s.get("group_id"):
             groups.setdefault(s["group_id"], []).append(s)
+    # An edge band inside a group stretches with the canvas; the rest of
+    # the group keeps one transform.
+    for gid, members in groups.items():
+        if len(members) > 1:
+            groups[gid] = [s for s in members if not edge_band(s, source["canvas"])]
     for gid, members in groups.items():
         if len(members) < 2:
             continue

@@ -1,5 +1,47 @@
 # Tested strategies
 
+## Engine round 3: design-quality rules from the AI-judge review (2026-10-31)
+
+Driven by the independent review of round-2 container outputs (`output/review/round2_judges_and_review.json`).
+`tests/heldout` and `tests/heldout2` were used as development data; `tests/heldout3` was not opened.
+All rules are geometric and read no ids, names or notes.
+
+Robustness:
+- `units.panel_box` clamped each corner separately, so a band lying wholly outside the source canvas got a negative width and every candidate failed (reproduced, regression test in `tests/test_robustness.py`).
+  Each axis is now clamped as an interval and the band keeps its own thickness.
+- Every element's unrotated x/y/width/height box stays on canvas as well as its rotated bounds (`geometry.extent`); `validate` checks both, matching the starter `self_check`.
+- `adaptive.search` never raises for a usable input: if no candidate validates it returns the one with the fewest problems, and a broken generator keeps the candidates found so far.
+- A zero line height is accepted (layout reserves 1.0 lines).
+
+Layout rules:
+- Safe margins from `policy.spacing`: 4% of the short side (at least 6px), up to 3% of each long side, and larger block gaps.
+- Legibility floors per role (headline, main button label, other copy, tertiary copy such as legal lines) in tiers from (13, 11, 10, 9) down to (10, 7, 6, 0); a tier is tried only when uniform scaling would paint copy below 10px and no layout is already legible, and lower tiers only when nothing fits.
+  Shrink-to-fit paths may not break a floor; groups that cannot reach a floor at any canvas-fitting size keep what fits.
+- Buttons, pills and badges share one scale (that of the largest label), never more than 1.25x the headline scale and never taller than 24% of the short side, so a corner tag stays smaller than the main button.
+- Artwork prominence bands (`policy.art_band`): the hero image keeps 0.9x to 2.5x of the short-side ratio, secondary images (logos) 0.8x to 1.5x, both with a legible minimum (40px or 30% of the short side).
+- Relationships: an edge band inside a group becomes its own band; a badge, stamp or tag overlapping a larger unit below it is merged with that host (a sticker stays attached at its corner); panels record the content painted on them, and carrier layouts keep that content inside the panel's strip (logo on a footer band, copy on a scrim).
+- Reading order by recursive row-first XY cuts, so an old price stays next to its new price.
+- Whole-body row bands keep the source content's share of the height and sit where the source put them (anchor weight `exp(-|log aspect change|)`); `preserved` splits spare room like the source margins.
+- Single-item rows of a stack share one alignment axis: left-aligned copy (and buttons aligned with it in the source) forms one centred column.
+- Repeated sets: the least-shrinking grid wins, list rows share a left edge, and grid rows sit 15% of a row apart, so a price reads with its own product.
+- Line balancing (no one-word orphans), dividers at least 1px thick and at canvas scale, padded art slides inward before shrinking, decorations that would leave slivers under an opaque button move clear.
+- Missing-asset placeholders are tucked fully under an opaque button or panel painted above them when one exists, otherwise placed at the smallest legal size.
+
+Scoring (`quality.composition`): margin violations, containment violations, art outside its band, art drifting from the headline scale, component excess, slack split unlike the source, decoration slivers, text at or below 7px, one-word-per-line wraps; legibility floor 9px; hierarchy keep 0.85 but ignored for copy at or below 10px.
+These are reported in every matrix row; none became a `--strict-quality` gate because none is always satisfiable (the anchored fallback can violate all of them).
+
+Container minimum painted font, round 2 to round 3: Level 1 38 to 41, Level 2 26 to 19 (subhead now held below the headline), Level 3 4 to 6 (headline 11, button 7, badges 6), editorial 23 to 23, typography 16 to 11, product trio 31 to 28, sparse decor 30 to 30, accented copy 26 to 25, editorial columns 19 to 18, layered groups 25 to 16, severe downscale 7 to 9, event poster 13 to 14, sale banner 12 to 7, app promo 3 to 3 (a caption inside a tall card group cannot grow without breaking the group), quote card 37 to 42, product grid 25 to 23, minimal brand 6 to 10, layered sticker 34 to 22, infographic 16 to 15.
+Lower minimums are mostly hierarchy fixes (secondary copy no longer inflated); inspect the PNGs.
+
+Visual notes from container renders: the quote card keeps the white logo on its dark band; the layered sticker becomes a top scrim band with the copy and the bottle below with its sticker attached; badges stay on their product or panel corner; the infographic list is a straight two-column grid; the minimal brand card stays optically centred; the sale banner reads 40% OFF, then the old and new price together.
+
+Remaining weaknesses:
+- 728x90 with many texts still paints supporting copy at 6-7px on Linux, where hinting mangles spacing (the rotated ribbon reads `SUNSETSALE`).
+- Groups keep one transform, so a small caption inside a tall card (app promo rating) stays at 3px on a leaderboard.
+- Wide banners from text-heavy portraits (typography fixture) still prefer a stacked column over a horizontal arrangement by a small score margin.
+- The product grid header puts the logo alone in a side column; corner anchoring for small corner tags (Level 2 badge) is not implemented.
+- Floored tiers add time on tiny targets: Level 3 takes 2.2s in the container (round 2: 1.95s); every development task stays under 2.3s.
+
 ## Engine round 2: canvas fill, painted type, columns and sets (2026-10-30)
 
 Round 1 left four failure classes, all fixed with geometric rules that read no ids or names.

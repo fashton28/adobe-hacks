@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 
-from webapp.server import LOCALHOST, make_servers, pipeline_names, server_url
+from webapp.server import LOCALHOST, make_servers, origin_matches, pipeline_names, server_url
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -15,9 +15,16 @@ def main(argv: list[str] | None = None) -> int:
                              "use 0.0.0.0 or :: to expose it on the network)")
     parser.add_argument("--port", type=int, default=8765, help="port to listen on (default: 8765, 0 = any free port)")
     parser.add_argument("--quiet", action="store_true", help="do not log each request")
+    parser.add_argument("--allow-origin", action="append", default=[], metavar="PATTERN",
+                        help="also accept browser requests from this origin, e.g. https://example.com or "
+                             "https://*.example.com (repeatable; '*' accepts any origin). Loopback origins, "
+                             "https://*.adobe.com and https://*.adobe-addons.com are always accepted")
     args = parser.parse_args(argv)
+    bad = [o for o in args.allow_origin if o != "*" and not origin_matches(o.replace("://*.", "://x.", 1), o)]
+    if bad:
+        parser.error(f"--allow-origin expects scheme://host[:port] or scheme://*.domain, got {bad}")
     try:
-        servers = make_servers(args.host, args.port, quiet=args.quiet)
+        servers = make_servers(args.host, args.port, quiet=args.quiet, allow_origins=args.allow_origin)
     except OSError as exc:
         print(f"Could not listen on {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 1

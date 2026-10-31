@@ -73,8 +73,9 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(validate(source, target, out), [])
         q = metrics(source, out)
         self.assertEqual((q["text_overflows"], q["overlap_pairs"]), (0, 0))
-        # The smallest source copy (the 12px legal line) keeps at least its source size.
-        self.assertGreaterEqual(q["min_font"], 12)
+        # Every copy stays legible (the 12px legal line is tertiary and may
+        # yield a little to margins and hierarchy, never below 10px).
+        self.assertGreaterEqual(q["min_font"], 10)
         product = next(e for e in out["elements"] if e["id"] == "product")
         self.assertGreater(product["width"], 280)
         visible = next(im for im in q["images"] if im["id"] == product["id"])
@@ -102,6 +103,13 @@ class AssetTests(unittest.TestCase):
                 self.assertGreater(min(el["width"], el["height"]), 0)
                 self.assertAlmostEqual(el["width"] / el["height"], src["width"] / src["height"], places=6)
                 box = aabb(el)
+                # Either hidden entirely under an opaque shape painted above it
+                # (a button), or clear of copy, product and logo.
+                covers = [aabb(o) for o in out["elements"]
+                          if o["type"] == "shape" and o.get("z_index", 0) > src["z_index"]
+                          and o["fill_color"].replace(" ", "").endswith(",1)") and o.get("opacity", 1) == 1]
+                if any(c[0] <= box[0] and c[1] <= box[1] and box[2] <= c[2] and box[3] <= c[3] for c in covers):
+                    continue
                 for other in out["elements"]:
                     if other["type"] == "text" or other["id"] in ("product", "logo"):
                         self.assertLessEqual(overlap_area(box, aabb(other)), 0.5, other["id"])

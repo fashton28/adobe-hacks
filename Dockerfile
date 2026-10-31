@@ -1,4 +1,7 @@
-FROM --platform=linux/amd64 python:3.11-slim
+# Base image pinned by digest (multi-arch index of python:3.11-slim) so every
+# build starts from the same OS and interpreter. To update: docker pull
+# python:3.11-slim, then copy its RepoDigest here and re-run scripts/docker_check.sh.
+FROM --platform=linux/amd64 python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60
 
 WORKDIR /app
 
@@ -26,8 +29,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # sample config ("unknown element reset-dirs") on every run.
     && rm -f /usr/share/fontconfig/conf.avail/05-reset-dirs-sample.conf
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt \
+# Fully pinned dependency tree (see requirements.lock for how to regenerate it):
+# 1. every PyPI package, hash-checked, with --no-deps so nothing unlocked can
+#    sneak in (hatchling, cr-renderer's build backend, is part of the lock);
+# 2. cr-renderer at the exact commit from requirements.txt, built without build
+#    isolation against the locked hatchling;
+# 3. pip check, plus a guard that every pin in requirements.txt is installed at
+#    exactly that version (fails the build when the lock is stale).
+COPY requirements.txt requirements.lock ./
+RUN pip install --require-hashes --no-deps -r requirements.lock \
+    && grep '^cr-renderer @ git+' requirements.txt > /tmp/vcs-requirements.txt \
+    && pip install --no-deps --no-build-isolation -r /tmp/vcs-requirements.txt \
+    && pip check \
+    && python -c "import re, sys, importlib.metadata as md; \
+norm = lambda n: re.sub(r'[-_.]+', '-', n).lower(); \
+have = {norm(d.metadata['Name']): d.version for d in md.distributions()}; \
+reqs = [l.split('#')[0].strip() for l in open('requirements.txt')]; \
+reqs = [re.split(r'[\s;@\[]', r)[0].partition('==') for r in reqs if r and not r.startswith('-')]; \
+bad = [n + p + v for n, p, v in reqs if have.get(norm(n)) is None or (v and have[norm(n)] != v)]; \
+sys.exit('requirements.lock is stale (re-run the command at its top): %s' % bad if bad else 0)" \
+    && rm -f /tmp/vcs-requirements.txt \
     && apt-get purge -y --auto-remove git \
     && rm -rf /var/lib/apt/lists/*
 

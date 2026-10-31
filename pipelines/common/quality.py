@@ -1,17 +1,34 @@
 """Independent, inspectable quality proxies; these are not official scores."""
 
+import json
 import math
 import statistics
 
 from .assets import asset_info, unavailable_unit
 from .geometry import aabb, overlap_area, union
+from .policy import anchor_weight, art_band, spacing
 from .text import measure, text_height
-from .units import BACKDROP_COVER, build_units, coverage, ink_box
+from .units import BACKDROP_COVER, build_units, coverage, fill_alpha, ink_box
 from .validate import is_background
 
 GRID = 48  # sample points per side for canvas-emptiness estimates
 BACKDROP_SLACK = 0.05  # allowed backdrop coverage shortfall before it is a failure
 EMPTY_GROWTH = 0.4  # allowed growth of empty canvas share over the source
+
+
+_UNITS_CACHE: list = []  # [(fingerprint, units)]: one entry, read-only use
+
+
+def _fingerprint(source: dict) -> str:
+    return json.dumps(source, sort_keys=True, default=str)
+
+
+def _units(source: dict) -> list[dict]:
+    """build_units for scoring, memoised for the source being searched (never mutated here)."""
+    key = _fingerprint(source)
+    if not _UNITS_CACHE or _UNITS_CACHE[0][0] != key:
+        _UNITS_CACHE[:] = [(key, build_units(source))]
+    return _UNITS_CACHE[0][1]
 
 
 def _backdrops(source: dict) -> list[dict]:
@@ -86,7 +103,7 @@ def _centroid_offset(design: dict, units: list[dict], source: dict) -> float:
 
 def imbalance(source: dict, out: dict) -> float:
     """How much further off-centre the content mass sits than in the source."""
-    units = [u for u in build_units(source) if u["kind"] in ("text", "rigid") and not unavailable_unit(source, u)]
+    units = [u for u in _units(source) if u["kind"] in ("text", "rigid") and not unavailable_unit(source, u)]
     return max(0.0, _centroid_offset(out, units, source) - _centroid_offset(source, units, source))
 
 
@@ -107,7 +124,7 @@ def new_text_pairs(source: dict, out: dict) -> int:
     banners need some, other formats read better as a column.
     """
     by_id = {el["id"]: el for el in out["elements"]}
-    units = [u for u in build_units(source) if u["kind"] in ("text", "rigid") and _texty(source, u)]
+    units = [u for u in _units(source) if u["kind"] in ("text", "rigid") and _texty(source, u)]
     boxes = [union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"]) for u in units]
     count = 0
     for i, u in enumerate(units):
@@ -115,6 +132,156 @@ def new_text_pairs(source: dict, out: dict) -> int:
             if _side_by_side(boxes[i], boxes[j]) and not _side_by_side(u["bbox"], units[j]["bbox"]):
                 count += 1
     return count
+
+
+def _out_ink(by_id, source, idx):
+    return union(ink_box(by_id[source["elements"][i]["id"]]) for i in idx)
+
+
+def composition(source: dict, out: dict, units: list[dict] | None = None) -> dict:
+    """Design-quality measurements that the AI judges keep pointing at.
+
+    * margin_violation: how far content intrudes into the safe inset
+      (`policy.spacing`), in margins, summed over units and edges; edges a
+      unit already touched in the source are exempt.
+    * containment_violations: carried content (a logo on a band, copy on a
+      scrim) that left its panel, plus other content straddling a panel edge.
+    * art_violation: artwork scale outside its prominence band (log units).
+    * art_text_change: artwork scale drifting from the headline's scale
+      beyond a free band (log units).
+    * component_excess: buttons/badges outgrowing the headline scale or the
+      short side (log units), ignoring legibility-driven sizes.
+    * slack_imbalance: spare room split unlike the source (anchoring), as a
+      share of the canvas.
+    * decor_slivers: translucent decorations mostly, but not wholly, hidden
+      under opaque content (reads as a glitch).
+    """
+    units = units if units is not None else _units(source)
+    by_id = {el["id"]: el for el in out["elements"]}
+    W, H = out["canvas"]["width"], out["canvas"]["height"]
+    Ws, Hs = source["canvas"]["width"], source["canvas"]["height"]
+    mx, my = spacing(W, H)[:2]
+    smx, smy = spacing(Ws, Hs)[:2]
+    content = [u for u in units if u["kind"] in ("text", "rigid") and not unavailable_unit(source, u)]
+    inks = {id(u): _out_ink(by_id, source, u["idx"]) for u in content}
+    margin = 0.0
+    for u in content:
+        x0, y0, x1, y1 = inks[id(u)]
+        sx0, sy0, sx1, sy1 = u["ink"]
+        for gap, need, src_gap, src_need in ((x0, mx, sx0, smx), (y0, my, sy0, smy),
+                                             (W - x1, mx, Ws - sx1, smx), (H - y1, my, Hs - sy1, smy)):
+            if src_gap >= 0.5 * src_need:
+                margin += max(0.0, 1 - gap / need)
+    contained = 0
+    for p in units:
+        if p["kind"] != "panel" or not p.get("carries"):
+            continue
+        px0, py0, px1, py1 = union(aabb(by_id[source["elements"][i]["id"]]) for i in p["idx"])
+        carried = {id(units[j]) for j in p["carries"]}
+        for u in content:
+            x0, y0, x1, y1 = inks[id(u)]
+            area = max(1e-9, (x1 - x0) * (y1 - y0))
+            share = overlap_area((x0, y0, x1, y1), (px0, py0, px1, py1)) / area
+            if id(u) in carried:
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                contained += not (px0 <= cx <= px1 and py0 <= cy <= py1)
+            elif 0.05 < share < 0.95:
+                contained += 1
+    art = 0.0
+    band = art_band(source, out["canvas"], units)
+    for u in units:
+        if tuple(u["idx"]) not in band:
+            continue
+        lo, hi = band[tuple(u["idx"])]
+        core = u.get("core_idx", u["idx"])
+        sx0, sy0, sx1, sy1 = u.get("core_ink", u["ink"])
+        x0, y0, x1, y1 = _out_ink(by_id, source, core)
+        scale = math.sqrt(max(1e-9, (x1 - x0) * (y1 - y0)) / max(1e-9, (sx1 - sx0) * (sy1 - sy0)))
+        art += max(0.0, math.log(lo / scale)) + max(0.0, math.log(scale / hi))
+    # Artwork keeps its size relative to the headline (log ratio change):
+    # a logo must not dwarf the message nor shrink beside it.
+    texts = [el for el in source["elements"] if el["type"] == "text"]
+    art_text = 0.0
+    if texts and band:
+        head = max(texts, key=lambda el: (el["font_size"], -source["elements"].index(el)))
+        head_scale = by_id[head["id"]]["font_size"] / head["font_size"]
+        for u in units:
+            if tuple(u["idx"]) not in band:
+                continue
+            sx0, sy0, sx1, sy1 = u.get("core_ink", u["ink"])
+            x0, y0, x1, y1 = _out_ink(by_id, source, u.get("core_idx", u["idx"]))
+            scale = math.sqrt(max(1e-9, (x1 - x0) * (y1 - y0)) / max(1e-9, (sx1 - sx0) * (sy1 - sy0)))
+            change = math.log(scale / head_scale)
+            art_text += max(0.0, -change - ART_TEXT_SLACK[0]) + max(0.0, change - ART_TEXT_SLACK[1])
+    excess = 0.0
+    if texts:
+        head = max(texts, key=lambda el: (el["font_size"], -source["elements"].index(el)))
+        head_scale = by_id[head["id"]]["font_size"] / head["font_size"]
+        short = min(W, H)
+        for u in content:
+            els = [source["elements"][i] for i in u["idx"]]
+            labels = [el for el in els if el["type"] == "text"]
+            if (len(labels) != 1 or not any(el["type"] == "shape" for el in els)
+                    or any(el["type"] == "image" for el in els) or labels[0] is head):
+                continue
+            size = by_id[labels[0]["id"]]["font_size"]
+            if size <= 12:
+                continue  # legibility, not inflation
+            excess += max(0.0, math.log(size / labels[0]["font_size"] / head_scale / (COMPONENT_GROWTH * 1.1)))
+            x0, y0, x1, y1 = inks[id(u)]
+            excess += max(0.0, math.log((y1 - y0) / short / COMPONENT_SHORT))
+    slack = 0.0
+    if content:
+        x0, y0, x1, y1 = union(inks.values())
+        sx0, sy0, sx1, sy1 = union(u["ink"] for u in content)
+        spread = anchor_weight(source["canvas"], out["canvas"])
+        for before, after, length, src_before, src_after in ((x0 - mx, W - mx - x1, W, sx0, Ws - sx1),
+                                                             (y0 - my, H - my - y1, H, sy0, Hs - sy1)):
+            before, after = max(0.0, before), max(0.0, after)
+            if before + after <= 1e-9:
+                continue
+            src_before, src_after = max(0.0, src_before), max(0.0, src_after)
+            want = 0.5 if src_before + src_after <= 1e-9 else src_before / (src_before + src_after)
+            want = 0.5 + (want - 0.5) * spread
+            slack += abs(before / (before + after) - want) * (before + after) / length
+    slivers = 0
+    opaque = [(union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"]),
+               max(source["elements"][i].get("z_index", i) for i in u["idx"]))
+              for u in content if all(source["elements"][i]["type"] == "shape" and fill_alpha(source["elements"][i]) >= 1
+                                      and source["elements"][i].get("opacity", 1) >= 1 for i in u["idx"])]
+    for u in units:
+        if u["kind"] != "decor":
+            continue
+        box = union(aabb(by_id[source["elements"][i]["id"]]) for i in u["idx"])
+        z = min(source["elements"][i].get("z_index", i) for i in u["idx"])
+        area = max(1e-9, (box[2] - box[0]) * (box[3] - box[1]))
+        hidden = min(1.0, sum(overlap_area(box, o) for o, oz in opaque if oz > z) / area)
+        slivers += SLIVER[0] < hidden < SLIVER[1]
+    return {"margin_violation": margin, "containment_violations": contained, "art_violation": art,
+            "art_text_change": art_text,
+            "component_excess": excess, "slack_imbalance": slack, "decor_slivers": slivers}
+
+
+COMPONENT_GROWTH = 1.25  # as the row solver: components grow at most this much more than the headline
+COMPONENT_SHORT = 0.26  # a one-label component taller than this share of the short side is oversized
+SLIVER = (0.5, 0.98)  # hidden share of a decoration that leaves only slivers visible
+ART_TEXT_SLACK = (math.log(1.5), math.log(1.6))  # free shrink / growth of art relative to the headline
+
+
+def _tucked(source: dict, by_id: dict, u: dict, box, v: dict) -> bool:
+    """A missing-asset placeholder hidden entirely under an opaque shape of `v` painted above it."""
+    if not unavailable_unit(source, u):
+        return False
+    z = max(source["elements"][i].get("z_index", i) for i in u["idx"])
+    for i in v["idx"]:
+        m = source["elements"][i]
+        if (m["type"] != "shape" or m.get("rotation", 0) or fill_alpha(m) < 1 or m.get("opacity", 1) < 1
+                or m.get("z_index", i) <= z):
+            continue
+        x0, y0, x1, y1 = aabb(by_id[m["id"]])
+        if x0 <= box[0] and y0 <= box[1] and box[2] <= x1 and box[3] <= y1:
+            return True
+    return False
 
 
 def metrics(source: dict, out: dict) -> dict:
@@ -152,7 +319,7 @@ def metrics(source: dict, out: dict) -> dict:
     # (they are deliberately relocated to free space).
     # Collisions use painted bounds: transparent padding of art can overlap.
     boxes = [(u, union(ink_box(by_id[source["elements"][i]["id"]]) for i in u["idx"]))
-             for u in build_units(source) if u["kind"] not in ("bg", "decor", "panel")]
+             for u in _units(source) if u["kind"] not in ("bg", "decor", "panel")]
     shifts = []
     for u, box in boxes:
         if unavailable_unit(source, u):
@@ -165,7 +332,7 @@ def metrics(source: dict, out: dict) -> dict:
     for i, (u, a) in enumerate(boxes):
         for v, b in boxes[i + 1:]:
             area = overlap_area(a, b)
-            if area > 0.5:
+            if area > 0.5 and not _tucked(source, by_id, u, a, v) and not _tucked(source, by_id, v, b, u):
                 denom = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
                 overlaps.append({"a": [source["elements"][j]["id"] for j in u["idx"]],
                                  "b": [source["elements"][j]["id"] for j in v["idx"]],
@@ -178,7 +345,8 @@ def metrics(source: dict, out: dict) -> dict:
             "texts": texts, "overlaps": overlaps, "images": images,
             "missing_assets": [im["asset_id"] for im in images if not im["available"]],
             "new_text_pairs": new_text_pairs(source, out), "imbalance": imbalance(source, out),
-            **canvas_fill(source, out)}
+            "tiny_text": sum(s <= TINY_PX for s in sizes),
+            **composition(source, out), **canvas_fill(source, out)}
 
 
 def hierarchy_penalty(source: dict, out: dict) -> float:
@@ -193,8 +361,8 @@ def hierarchy_penalty(source: dict, out: dict) -> float:
     ids = sorted(src, key=lambda i: -src[i])
     for n, a in enumerate(ids):
         for b in ids[n + 1:]:
-            if src[a] < src[b] * 1.15:
-                continue
+            if src[a] < src[b] * 1.15 or new[b] <= LEGIBLE_PX + 1:
+                continue  # legibility outranks hierarchy for the smallest copy
             need = HIERARCHY_KEEP * math.log(src[a] / src[b])
             total += max(0.0, need - math.log(new[a] / new[b]))
             pairs += 1
@@ -230,9 +398,13 @@ def choppy_penalty(out: dict, min_chars: float = 14.0) -> float:
         if el["type"] != "text":
             continue
         lines, _ = measure(el, el["font_size"], el["width"])
-        per_line = len(str(el.get("content", "")).strip()) / lines
+        content = str(el.get("content", "")).strip()
+        per_line = len(content) / lines
         if lines > 1 and per_line < min_chars:
             total += math.log(min_chars / max(per_line, 1))
+        # A short label stacked one word per line reads as a broken column.
+        if lines > 1 and len(content.split()) / lines < 1.5:
+            total += 1.0
     return total
 
 
@@ -247,7 +419,7 @@ def group_area_penalty(source: dict, out: dict, allowed: float = 2.5) -> float:
     allowed *= math.exp(0.5 * stretch)
     by_id = {el["id"]: el for el in out["elements"]}
     excess = []
-    for u in build_units(source):
+    for u in _units(source):
         if u["kind"] != "rigid" or len(u["idx"]) < 2 or u["art"]:
             continue
         x0, y0, x1, y1 = u["bbox"]
@@ -261,12 +433,22 @@ def group_area_penalty(source: dict, out: dict, allowed: float = 2.5) -> float:
 
 TEXT_PAIR_WEIGHT = 0.2
 IMAGE_WEIGHT = 0.4
-LEGIBLE_PX = 8.0
+LEGIBLE_PX = 9.0
+TINY_PX = 7  # the official renderer mangles glyph spacing at and below this size
+TINY_WEIGHT = 0.3
 LEGIBLE_WEIGHT = 1.5
 HEADLINE_WEIGHT = 0.5
 BALANCE_WEIGHT = 2.5
 BALANCE_SLACK = 0.01
-HIERARCHY_KEEP = 0.75
+HIERARCHY_KEEP = 0.85
+MARGIN_WEIGHT = 0.5
+CONTAINMENT_WEIGHT = 1.5
+ART_WEIGHT = 0.8
+COMPONENT_WEIGHT = 1.5
+SLACK_WEIGHT = 1.5
+SLIVER_WEIGHT = 0.5
+CHOPPY_WEIGHT = 0.8
+ART_TEXT_WEIGHT = 1.0
 
 
 def aspect_change(source: dict, out: dict) -> float:
@@ -305,7 +487,7 @@ def score(source: dict, out: dict, q: dict | None = None) -> float:
     src = {el["id"]: el for el in source["elements"]}
     # Art scale: images, and text-free shape art (a sun, a seal) that the
     # layout treats like an image; backdrops and decorations do not count.
-    shape_art = {source["elements"][u["idx"][0]]["id"] for u in build_units(source)
+    shape_art = {source["elements"][u["idx"][0]]["id"] for u in _units(source)
                  if u["kind"] == "rigid" and len(u["idx"]) == 1 and u["art"] and not u["images_only"]
                  and source["elements"][u["idx"][0]].get("shape_type") != "line"
                  and min(u["bbox"][2] - u["bbox"][0], u["bbox"][3] - u["bbox"][1])
@@ -317,5 +499,10 @@ def score(source: dict, out: dict, q: dict | None = None) -> float:
     return (readability + (IMAGE_WEIGHT * sum(images) / len(images) if images else 0)
             - 4 * q["text_overflows"] - 2 * q["overlap_severity"] - TEXT_PAIR_WEIGHT * math.exp(-aspect_change(source, out)) * q["new_text_pairs"]
             - BALANCE_WEIGHT * max(0.0, q["imbalance"] - BALANCE_SLACK)
-            - 3 * hierarchy_penalty(source, out) - 2 * inflation_penalty(source, out) - 0.4 * choppy_penalty(out)
-            - 1.5 * group_area_penalty(source, out))
+            - 3 * hierarchy_penalty(source, out) - 2 * inflation_penalty(source, out) - CHOPPY_WEIGHT * choppy_penalty(out)
+            - 1.5 * group_area_penalty(source, out)
+            - TINY_WEIGHT * q["tiny_text"] - MARGIN_WEIGHT * q["margin_violation"]
+            - CONTAINMENT_WEIGHT * q["containment_violations"] - ART_WEIGHT * q["art_violation"]
+            - COMPONENT_WEIGHT * q["component_excess"] - SLACK_WEIGHT * q["slack_imbalance"]
+            - ART_TEXT_WEIGHT * q["art_text_change"]
+            - SLIVER_WEIGHT * q["decor_slivers"])

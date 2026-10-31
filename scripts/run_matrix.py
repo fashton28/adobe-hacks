@@ -129,6 +129,8 @@ def main(argv=None) -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("output/matrix"))
     parser.add_argument("--variants", action="store_true")
     parser.add_argument("--include-source", action="store_true", help="Also test the original canvas")
+    parser.add_argument("--task-only", action="store_true",
+                        help="Only each task's requested target (plus the source canvas with --include-source)")
     parser.add_argument("--check-determinism", action="store_true")
     parser.add_argument("--strict-quality", action="store_true",
                         help="Fail for text overflow, unrelated unit overlap, a lost backdrop or a mostly empty canvas")
@@ -169,7 +171,7 @@ def main(argv=None) -> int:
                 source_pngs[tag] = source_png
             source_json = f"{tag}_source.json"
             (args.output_dir / source_json).write_text(json.dumps(source, indent=2, allow_nan=False), encoding="utf-8")
-            targets = {name: TARGETS[name] for name in args.targets}
+            targets = {} if args.task_only else {name: TARGETS[name] for name in args.targets}
             # Always include the task's actual requested target, even if the
             # development catalogue changes or a fixture uses another size.
             task_target = task.get("target_canvas")

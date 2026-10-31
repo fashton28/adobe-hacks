@@ -4,6 +4,8 @@ Run from the repo root: .venv/bin/python -m unittest discover -s webapp/tests -t
 """
 
 import base64
+import contextlib
+import io
 import json
 import os
 import socket
@@ -14,7 +16,16 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from webapp.server import MAX_BODY_BYTES, make_server, make_servers, server_url
+from webapp.__main__ import main as cli_main
+from webapp.server import (
+    MAX_BODY_BYTES,
+    MAX_ELEMENTS,
+    allowed_hosts,
+    make_server,
+    make_servers,
+    origin_matches,
+    server_url,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 LEVEL1 = ROOT / "input" / "chameleon_sample_level1_warmup.json"
@@ -45,26 +56,27 @@ class ServerTest(unittest.TestCase):
 
     def request(self, path, method="GET", body=None, raw=None, headers=None):
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
-        req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers or {})
+        headers = dict(headers or {})
         if data is not None:
-            req.add_header("Content-Type", "application/json")
+            headers.setdefault("Content-Type", "application/json")
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return resp.status, dict(resp.headers), resp.read()
         except urllib.error.HTTPError as err:
             return err.code, dict(err.headers), err.read()
 
-    def get_json(self, path, expect=200):
-        status, headers, body = self.request(path)
+    def get_json(self, path, expect=200, headers=None):
+        status, response_headers, body = self.request(path, headers=headers)
         self.assertEqual(status, expect, body[:300])
-        self.assertEqual(headers.get("Access-Control-Allow-Origin"), "*")
-        self.assertTrue(headers["Content-Type"].startswith("application/json"))
+        self.assertEqual(response_headers.get("Vary"), "Origin")
+        self.assertTrue(response_headers["Content-Type"].startswith("application/json"))
         return json.loads(body)
 
-    def post_json(self, body, expect=200, raw=None):
-        status, headers, payload = self.request("/api/resize", "POST", body=body, raw=raw)
+    def post_json(self, body, expect=200, raw=None, headers=None):
+        status, response_headers, payload = self.request("/api/resize", "POST", body=body, raw=raw, headers=headers)
         self.assertEqual(status, expect, payload[:500])
-        self.assertEqual(headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertEqual(response_headers.get("Vary"), "Origin")
         return json.loads(payload)
 
     # ---- GET endpoints
@@ -137,19 +149,118 @@ class ServerTest(unittest.TestCase):
             status, _, _ = self.request(path)
             self.assertEqual(status, 404, path)
 
-    # ---- CORS
+    # ---- CORS, Host and Origin policy
+
+    ALLOWED_ORIGINS = (
+        "https://new.express.adobe.com",                 # Adobe Express itself
+        "https://express.adobe.com",
+        "https://abc123def.wxp.adobe-addons.com",        # a published add-on panel
+        "https://localhost:5241",                        # the add-on dev server
+        "http://localhost:8765",
+        "http://127.0.0.1:9000",
+        "http://[::1]:8765",
+    )
+    REFUSED_ORIGINS = (
+        "https://evil.example",
+        "http://express.adobe.com",                      # Adobe origins must be https
+        "https://adobe.com.evil.example",
+        "https://evil-adobe.com",
+        "https://adobe-addons.com.evil.example",
+        "http://localhost.evil.example:8765",
+        "null",                                          # sandboxed iframes, file:// pages
+        "not an origin",
+    )
 
     def test_cors_preflight(self):
-        status, headers, body = self.request("/api/resize", "OPTIONS", headers={
-            "Origin": "https://express.adobe.com",
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type",
-        })
-        self.assertEqual(status, 204)
-        self.assertEqual(body, b"")
-        self.assertEqual(headers["Access-Control-Allow-Origin"], "*")
-        self.assertIn("POST", headers["Access-Control-Allow-Methods"])
-        self.assertIn("content-type", headers["Access-Control-Allow-Headers"].lower())
+        for origin in self.ALLOWED_ORIGINS:
+            with self.subTest(origin=origin):
+                status, headers, body = self.request("/api/resize", "OPTIONS", headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                    "Access-Control-Request-Private-Network": "true",
+                })
+                self.assertEqual(status, 204)
+                self.assertEqual(body, b"")
+                self.assertEqual(headers["Access-Control-Allow-Origin"], origin)
+                self.assertEqual(headers["Vary"], "Origin")
+                self.assertIn("POST", headers["Access-Control-Allow-Methods"])
+                self.assertIn("content-type", headers["Access-Control-Allow-Headers"].lower())
+                self.assertEqual(headers["Access-Control-Allow-Private-Network"], "true")
+
+    def test_allowed_origin_is_echoed(self):
+        status, headers, _ = self.request("/api/health", headers={"Origin": "https://x1.wxp.adobe-addons.com"})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Access-Control-Allow-Origin"], "https://x1.wxp.adobe-addons.com")
+
+    def test_no_origin_means_no_cors_headers(self):
+        status, headers, _ = self.request("/api/health")
+        self.assertEqual(status, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+        self.assertEqual(headers["Vary"], "Origin")
+
+    def test_refused_origins(self):
+        task = json.loads(LEVEL1.read_text())
+        for origin in self.REFUSED_ORIGINS:
+            with self.subTest(origin=origin):
+                for method, path, body in (("OPTIONS", "/api/resize", None), ("GET", "/api/samples", None),
+                                           ("POST", "/api/resize", {"task": task})):
+                    with patch("webapp.server.run_engine") as engine:
+                        status, headers, payload = self.request(path, method, body=body, headers={"Origin": origin})
+                    self.assertEqual(status, 403, (method, payload[:200]))
+                    self.assertNotIn("Access-Control-Allow-Origin", headers)
+                    self.assertIn("not allowed", json.loads(payload)["error"])
+                    engine.assert_not_called()
+        self.assertEqual(self.get_json("/api/health"), {"ok": True})
+
+    def test_same_origin_is_allowed(self):
+        """The viewer's own page sends Origin == its own URL on POST."""
+        port = self.server.server_address[1]
+        status, headers, _ = self.request("/api/health", headers={"Origin": f"http://127.0.0.1:{port}"})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Access-Control-Allow-Origin"], f"http://127.0.0.1:{port}")
+
+    def test_host_header_is_validated(self):
+        """DNS rebinding: a foreign name resolving to 127.0.0.1 must be refused."""
+        port = self.server.server_address[1]
+        for host in (f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}", f"LOCALHOST:{port}"):
+            with self.subTest(host=host):
+                self.assertEqual(self.get_json("/api/health", headers={"Host": host}), {"ok": True})
+        for host in (f"evil.example:{port}", "localhost", f"localhost:{port + 1}", f"127.0.0.2:{port}",
+                     f"localhost.:{port}", f"0.0.0.0:{port}"):
+            with self.subTest(host=host):
+                data = self.get_json("/api/samples", expect=403, headers={"Host": host})
+                self.assertIn("not allowed", data["error"])
+        reply = self.raw_exchange(b"GET /api/health HTTP/1.0\r\n\r\n")
+        self.assertIn(b" 400 ", reply.split(b"\r\n", 1)[0])
+        self.assertIn(b"missing Host header", reply)
+
+    def test_post_requires_json_content_type(self):
+        task = json.loads(LEVEL1.read_text())
+        raw = json.dumps({"task": task}).encode()
+        for ctype in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x",
+                      "application/jsonx"):
+            with self.subTest(ctype=ctype), patch("webapp.server.run_engine") as engine:
+                data = self.post_json(None, expect=415, raw=raw, headers={"Content-Type": ctype})
+                self.assertIn("application/json", data["error"])
+                engine.assert_not_called()
+        port = self.server.server_address[1]
+        reply = self.raw_exchange(b"POST /api/resize HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nContent-Length: %d\r\n\r\n"
+                                  % (port, len(raw)) + raw)
+        self.assertIn(b" 415 ", reply.split(b"\r\n", 1)[0])
+        self.assertEqual(reply.count(b"HTTP/1.1 "), 1)
+        data = self.post_json(None, raw=raw, headers={"Content-Type": "application/json; charset=utf-8"})
+        self.check_resize(data, task)
+
+    def test_too_many_elements(self):
+        element = {"type": "shape", "shape_type": "rectangle", "x": 0, "y": 0, "width": 1, "height": 1,
+                   "fill_color": "rgba(0,0,0,1)"}
+        source = {"canvas": {"width": 100, "height": 100},
+                  "elements": [{**element, "id": f"e{i}"} for i in range(MAX_ELEMENTS + 1)]}
+        with patch("webapp.server.run_engine") as engine:
+            data = self.post_json({"source": source, "target_canvas": {"width": 50, "height": 50}}, expect=400)
+        self.assertIn(str(MAX_ELEMENTS), data["error"])
+        engine.assert_not_called()
 
     # ---- resize
 
@@ -187,7 +298,6 @@ class ServerTest(unittest.TestCase):
     def test_resize_bad_input(self):
         task = json.loads(LEVEL1.read_text())
         cases = [
-            None,
             [],
             {},
             {"source": task["source"]},
@@ -210,6 +320,7 @@ class ServerTest(unittest.TestCase):
                 self.assertTrue(data["error"])
         self.assertIn("error", self.post_json(None, expect=400, raw=b"{not json"))
         self.assertIn("error", self.post_json(None, expect=400, raw=b""))
+        self.assertIn("error", self.post_json(None, expect=415))  # No body, no Content-Type.
         # The server must keep answering after bad requests.
         self.assertEqual(self.get_json("/api/health"), {"ok": True})
 
@@ -224,7 +335,8 @@ class ServerTest(unittest.TestCase):
 
     def test_unframed_bodies_close_the_connection(self):
         """Bodies the server will not read must not be parsed as a follow-up request."""
-        smuggled = b"GET /api/health HTTP/1.1\r\nHost: x\r\n\r\n"
+        host = b"Host: 127.0.0.1:%d\r\n" % self.server.server_address[1]
+        smuggled = b"GET /api/health HTTP/1.1\r\n" + host + b"\r\n"
         cases = {
             "chunked": b"Transfer-Encoding: chunked\r\n\r\n" + b"%x\r\n" % len(smuggled) + smuggled + b"\r\n0\r\n\r\n",
             "bad length": b"Content-Length: abc\r\n\r\n" + smuggled,
@@ -232,7 +344,8 @@ class ServerTest(unittest.TestCase):
         }
         for name, rest in cases.items():
             with self.subTest(name):
-                reply = self.raw_exchange(b"POST /api/resize HTTP/1.1\r\nHost: x\r\n" + rest)
+                reply = self.raw_exchange(b"POST /api/resize HTTP/1.1\r\n" + host
+                                          + b"Content-Type: application/json\r\n" + rest)
                 self.assertEqual(reply.count(b"HTTP/1.1 "), 1, reply[:300])
                 self.assertRegex(reply.split(b"\r\n", 1)[0], rb" 4(00|13) ")
 
@@ -265,6 +378,72 @@ class ServerTest(unittest.TestCase):
         for width, status, payload in results:
             self.assertEqual(status, 200)
             self.assertEqual(png_size(payload["output_png"]), (width, 600))
+
+
+class PolicyTest(unittest.TestCase):
+    """Pure functions behind the Host and Origin checks, and the CLI flag."""
+
+    def test_allowed_hosts(self):
+        for bind in ("localhost", "127.0.0.1", "::1", "[::1]"):
+            self.assertEqual(allowed_hosts(bind, 8765),
+                             {"localhost:8765", "127.0.0.1:8765", "[::1]:8765"}, bind)
+        self.assertIn("localhost", allowed_hosts("127.0.0.1", 80))
+        for bind in ("0.0.0.0", "::", "", "192.168.1.20"):
+            self.assertIsNone(allowed_hosts(bind, 8765), bind)
+
+    def test_origin_matches(self):
+        cases = [
+            ("https://a.b.adobe.com", "https://*.adobe.com", True),
+            ("https://adobe.com", "https://*.adobe.com", False),
+            ("https://a.adobe.com:8443", "https://*.adobe.com", True),
+            ("https://a.adobe.com.evil", "https://*.adobe.com", False),
+            ("https://xadobe.com", "https://*.adobe.com", False),
+            ("http://a.adobe.com", "https://*.adobe.com", False),
+            ("https://example.com", "https://example.com", True),
+            ("https://example.com:444", "https://example.com:443", False),
+            ("https://example.com/path", "https://example.com", False),
+            ("https://user@example.com", "https://example.com", False),
+            ("null", "https://example.com", False),
+            ("https://example.com:99999", "https://example.com", False),
+            ("anything", "*", True),
+        ]
+        for origin, pattern, expected in cases:
+            self.assertEqual(origin_matches(origin, pattern), expected, (origin, pattern))
+
+    def test_allow_origin_flag(self):
+        server = make_server("127.0.0.1", 0, quiet=True, allow_origins=["https://*.example.org"])
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{server.server_address[1]}/api/health"
+        for origin, expected in (("https://a.example.org", 200), ("https://new.express.adobe.com", 200),
+                                 ("https://example.net", 403)):
+            req = urllib.request.Request(base, headers={"Origin": origin})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    status, acao = resp.status, resp.headers.get("Access-Control-Allow-Origin")
+            except urllib.error.HTTPError as err:
+                status, acao = err.code, err.headers.get("Access-Control-Allow-Origin")
+            self.assertEqual(status, expected, origin)
+            self.assertEqual(acao, origin if expected == 200 else None, origin)
+
+    def test_allow_any_origin(self):
+        server = make_server("127.0.0.1", 0, quiet=True, allow_origins=["*"])
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        req = urllib.request.Request(f"http://127.0.0.1:{server.server_address[1]}/api/health",
+                                     headers={"Origin": "https://evil.example"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            self.assertEqual(resp.headers["Access-Control-Allow-Origin"], "*")
+
+    def test_cli_rejects_malformed_allow_origin(self):
+        for bad in ("example.com", "https://example.com/", "ftp://example.com"):
+            with self.subTest(bad=bad), self.assertRaises(SystemExit) as ctx, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                cli_main(["--port", "0", "--allow-origin", bad])
+            self.assertEqual(ctx.exception.code, 2)
 
 
 class LocalhostBindTest(unittest.TestCase):

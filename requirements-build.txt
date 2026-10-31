@@ -1,0 +1,4 @@
+# Build-time only: the build backend of cr-renderer (see requirements.txt).
+# The Docker image installs it from requirements.lock and builds cr-renderer
+# without build isolation, so no unpinned package is fetched during the build.
+hatchling

@@ -9,8 +9,24 @@ The HTTP API is a stable contract shared with the Adobe Express add-on:
     GET  /api/samples/<dir>/<name>   -> raw task JSON
     POST /api/resize                 -> output design, diagnostics and rendered PNGs
 
-Every response carries `Access-Control-Allow-Origin: *` and OPTIONS preflights
-are answered, so browser-hosted clients on other origins can call it.
+Browser-facing hardening (the server runs on the user's machine and any web
+page they visit can try to reach it):
+
+- Host header: on a loopback bind only `localhost`, `127.0.0.1` and `[::1]`
+  with the bound port are accepted (403 otherwise), which defeats DNS
+  rebinding. Binding any other address (`--host`) accepts any Host.
+- Origin: a request that carries an `Origin` header is answered only when the
+  origin is the server itself, a loopback origin (any port, http or https),
+  `https://*.adobe.com` or `https://*.adobe-addons.com` (the Express add-on
+  panel, including `https://<id>.wxp.adobe-addons.com`), or matches an extra
+  `--allow-origin` pattern (403 otherwise). Allowed origins are echoed in
+  `Access-Control-Allow-Origin` with `Vary: Origin`; OPTIONS preflights are
+  answered for them, including Chrome's Private Network Access header.
+- POST bodies must be `Content-Type: application/json` (415 otherwise), which
+  also forces a CORS preflight for cross-origin callers, carry a
+  `Content-Length` of at most MAX_BODY_BYTES (413) and hold at most
+  MAX_ELEMENTS source elements (400).
+
 Static files are served from `webapp/static/`, brand assets from `/assets/` and
 brand fonts from `/fonts/` (all read-only).
 """
@@ -59,6 +75,7 @@ if str(ROOT) not in sys.path:  # Allow `python webapp/server.py` as well as `-m 
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 MAX_CANVAS_SIDE = 8192
+MAX_ELEMENTS = 500
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")
 
 # The engine's measurement caches and the renderer's shared font manager are
@@ -167,6 +184,9 @@ def parse_resize_request(body: Any) -> tuple[dict, dict, str]:
         raise BadRequest("missing 'source' design object (or a full task in 'task')")
     if not isinstance(target, dict):
         raise BadRequest("missing 'target_canvas' object with width and height")
+    elements = source.get("elements")
+    if isinstance(elements, list) and len(elements) > MAX_ELEMENTS:
+        raise BadRequest(f"source has {len(elements)} elements; at most {MAX_ELEMENTS} are accepted")
     target = {"width": target.get("width"), "height": target.get("height")}
     pipeline = body.get("pipeline")
     names, default = pipeline_names()
@@ -248,6 +268,68 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+# --------------------------------------------------------------------------- request policy
+
+LOOPBACK_NAMES = ("localhost", "127.0.0.1", "[::1]")
+# Origins allowed to call the API from a browser by default: loopback pages on
+# any port (the viewer itself, the add-on dev server at https://localhost:5241)
+# and Adobe Express plus its add-on sandboxes (https://<id>.wxp.adobe-addons.com).
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost", "https://localhost",
+    "http://127.0.0.1", "https://127.0.0.1",
+    "http://[::1]", "https://[::1]",
+    "https://*.adobe.com",
+    "https://*.adobe-addons.com",
+)
+
+
+def allowed_hosts(bind_host: str, port: int) -> frozenset[str] | None:
+    """Host header values accepted by a server bound to `bind_host`:`port`.
+
+    Loopback binds accept only the loopback names with the bound port (and the
+    bare names on port 80), so a rebound DNS name pointing at 127.0.0.1 is
+    refused. Any other bind returns None, meaning every Host is accepted: the
+    user chose to expose the server under names it cannot know.
+    """
+    if bind_host.strip("[]").lower() not in ("localhost", "127.0.0.1", "::1"):
+        return None
+    hosts = {f"{name}:{port}" for name in LOOPBACK_NAMES}
+    if port == 80:
+        hosts.update(LOOPBACK_NAMES)
+    return frozenset(hosts)
+
+
+def _split_origin(origin: str) -> tuple[str, str, int | None] | None:
+    """('https', 'host', port or None) for a serialized origin, None if malformed."""
+    try:
+        parts = urlsplit(origin)
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.path or parts.query \
+            or parts.fragment or parts.username or parts.password:
+        return None
+    return parts.scheme, parts.hostname.lower(), port
+
+
+def origin_matches(origin: str, pattern: str) -> bool:
+    """Match an Origin header against `scheme://host[:port]` or `scheme://*.domain[:port]`.
+
+    `*.domain` matches subdomains only (not the bare domain). A pattern without
+    a port matches any port; "*" matches every origin.
+    """
+    if pattern == "*":
+        return True
+    got, want = _split_origin(origin), _split_origin(pattern.replace("://*.", "://wildcard.", 1))
+    if got is None or want is None or got[0] != want[0]:
+        return False
+    if want[2] is not None and got[2] != want[2]:
+        return False
+    if pattern.split("://", 1)[1].startswith("*."):
+        return got[1].endswith("." + want[1][len("wildcard."):])
+    return got[1] == want[1]
+
+
 def _safe_file(base: Path, name: str) -> Path | None:
     """Resolve `name` inside `base`, refusing traversal and hidden files."""
     if not name or any(not _SAFE_NAME.match(part) for part in name.split("/")):
@@ -267,6 +349,11 @@ class Handler(BaseHTTPRequestHandler):
     # Socket read timeout: drops idle keep-alive connections and clients that stall
     # mid-request, so they cannot pin handler threads forever.
     timeout = 30
+    # Set per server by make_server: accepted Host values (None = any) and the
+    # Origin patterns allowed in addition to the server's own origin.
+    allowed_hosts: frozenset[str] | None = None
+    allowed_origins: tuple[str, ...] = DEFAULT_ALLOWED_ORIGINS
+    _cors_origin: str | None = None
 
     # ---- plumbing
 
@@ -275,10 +362,40 @@ class Handler(BaseHTTPRequestHandler):
             super().log_message(format, *args)
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Vary", "Origin")
+        if self._cors_origin is None:
+            return
+        self.send_header("Access-Control-Allow-Origin", self._cors_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Max-Age", "600")
+
+    def _admit(self) -> bool:
+        """Apply the Host and Origin policy; send 400/403 and return False on refusal."""
+        self._cors_origin = None
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host:
+            return self._refuse(HTTPStatus.BAD_REQUEST, "missing Host header")
+        if self.allowed_hosts is not None and host not in self.allowed_hosts:
+            return self._refuse(HTTPStatus.FORBIDDEN, f"host {host!r} is not allowed; "
+                                "open the viewer via localhost, 127.0.0.1 or [::1]")
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True  # Not a cross-origin browser request (curl, navigation, same-origin GET).
+        if "*" in self.allowed_origins:
+            self._cors_origin = "*"
+            return True
+        if origin_matches(origin, f"http://{host}") or any(origin_matches(origin, p) for p in self.allowed_origins):
+            self._cors_origin = origin
+            return True
+        return self._refuse(HTTPStatus.FORBIDDEN, f"origin {origin!r} is not allowed "
+                            "(start the server with --allow-origin to permit it)")
+
+    def _refuse(self, status: int, message: str) -> bool:
+        self.close_connection = True  # Any request body stays unread.
+        with contextlib.suppress(OSError):
+            self._error(status, message)
+        return False
 
     def _send(self, status: int, body: bytes, content_type: str, cache: str = "no-store") -> None:
         self.send_response(status)
@@ -323,8 +440,13 @@ class Handler(BaseHTTPRequestHandler):
     # ---- verbs
 
     def do_OPTIONS(self) -> None:
+        if not self._admit():
+            return
         self.send_response(HTTPStatus.NO_CONTENT)
         self._cors()
+        if self._cors_origin is not None and self.headers.get("Access-Control-Request-Private-Network") == "true":
+            # Chrome's Private Network Access preflight (public page -> localhost).
+            self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -332,10 +454,12 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self) -> None:
-        self._guard(self._get)
+        if self._admit():
+            self._guard(self._get)
 
     def do_POST(self) -> None:
-        self._guard(self._post)
+        if self._admit():
+            self._guard(self._post)
 
     def _get(self) -> None:
         path = unquote(urlsplit(self.path).path)
@@ -372,6 +496,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path != "/api/resize":
             self._error(HTTPStatus.NOT_FOUND, f"unknown endpoint {path}")
+            return
+        if self.headers.get_content_type() != "application/json":
+            self.close_connection = True  # The unread body would be parsed as the next request.
+            self._error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json")
             return
         if self.headers.get("Transfer-Encoding"):
             self.close_connection = True  # The unread body would be parsed as the next request.
@@ -425,18 +553,27 @@ class _Server(ThreadingHTTPServer):
         self.server_name, self.server_port = host, port
 
 
-def make_server(host: str = "127.0.0.1", port: int = 8765, quiet: bool = False) -> ThreadingHTTPServer:
-    """Bind one listening socket. IPv6 literals ("::1", "::") get an IPv6 socket."""
-    handler = type("ChameleonHandler", (Handler,), {"quiet": quiet})
+def make_server(host: str = "127.0.0.1", port: int = 8765, quiet: bool = False,
+                allow_origins: tuple[str, ...] | list[str] = ()) -> ThreadingHTTPServer:
+    """Bind one listening socket. IPv6 literals ("::1", "::") get an IPv6 socket.
+
+    `allow_origins` adds Origin patterns (see `origin_matches`) to
+    DEFAULT_ALLOWED_ORIGINS; "*" allows every origin.
+    """
+    handler = type("ChameleonHandler", (Handler,), {
+        "quiet": quiet, "allowed_origins": DEFAULT_ALLOWED_ORIGINS + tuple(allow_origins)})
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     server_class = type("ChameleonServer", (_Server,), {"address_family": family})
-    return server_class((host, port), handler)
+    server = server_class((host, port), handler)
+    handler.allowed_hosts = allowed_hosts(host, server.server_address[1])
+    return server
 
 
 LOCALHOST = "localhost"
 
 
-def make_servers(host: str = LOCALHOST, port: int = 8765, quiet: bool = False) -> list[ThreadingHTTPServer]:
+def make_servers(host: str = LOCALHOST, port: int = 8765, quiet: bool = False,
+                 allow_origins: tuple[str, ...] | list[str] = ()) -> list[ThreadingHTTPServer]:
     """Bind the viewer; "localhost" means both 127.0.0.1 and ::1 on the same port.
 
     Browsers may resolve localhost to either address, so binding only one of them
@@ -444,12 +581,12 @@ def make_servers(host: str = LOCALHOST, port: int = 8765, quiet: bool = False) -
     loopback, the IPv4 socket alone is used. Any other host binds exactly that address.
     """
     if host != LOCALHOST:
-        return [make_server(host, port, quiet)]
+        return [make_server(host, port, quiet, allow_origins)]
     for _attempt in range(5 if port == 0 else 1):
-        first = make_server("127.0.0.1", port, quiet)
+        first = make_server("127.0.0.1", port, quiet, allow_origins)
         chosen = first.server_address[1]
         try:
-            return [first, make_server("::1", chosen, quiet)]
+            return [first, make_server("::1", chosen, quiet, allow_origins)]
         except OSError as exc:
             if exc.errno in (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
                 return [first]  # No IPv6 loopback on this machine.

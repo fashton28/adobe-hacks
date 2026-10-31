@@ -144,9 +144,14 @@ class LayoutTests(unittest.TestCase):
         task = samples()[2]
         source, target = task["source"], task["target_canvas"]
         before = metrics(source, get_pipeline("layout_v1")(source, target))
-        after = metrics(source, get_pipeline("flow")(source, target))
+        after = metrics(source, get_pipeline("adaptive")(source, target))
         self.assertGreater(after["min_font"], before["min_font"] * 1.5)
         self.assertLess(after["below_6px"], before["below_6px"])
+        # Legibility floors: the headline and the main button label stay readable.
+        out = get_pipeline("adaptive")(source, target)
+        sizes = {e["id"]: e["font_size"] for e in out["elements"] if e["type"] == "text"}
+        self.assertGreaterEqual(sizes["headline"], 10)
+        self.assertGreaterEqual(sizes["cta_label"], 9)
 
     def test_renaming_and_removing_notes_preserves_decisions(self):
         source = fixture()

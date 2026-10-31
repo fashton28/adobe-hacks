@@ -1,0 +1,218 @@
+{
+  "task_id": "heldout3_06_festival_lineup",
+  "difficulty": "level_3_advanced",
+  "difficulty_label": "Level 3 - Advanced",
+  "notes": "Festival poster with very long copy: a single lineup text element of three paragraphs (about 450 characters) with bold gold day names via style_runs, a two-line display headline, a date pill and a ticket button, plus two large translucent circles overlapping the copy. Portrait 4:5 to a 1600x400 wide web banner, so the lineup must stay readable in a short, wide band.",
+  "source": {
+    "canvas": {
+      "width": 1080,
+      "height": 1350
+    },
+    "elements": [
+      {
+        "id": "bg",
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "width": 1080,
+        "height": 1350,
+        "asset_id": "solstice_bg_gradient.png",
+        "fit": "cover",
+        "z_index": 0
+      },
+      {
+        "id": "deco_sun",
+        "type": "shape",
+        "x": 560,
+        "y": -260,
+        "width": 800,
+        "height": 800,
+        "shape_type": "ellipse",
+        "fill_color": "rgba(240,178,66,1)",
+        "opacity": 0.16,
+        "z_index": 1
+      },
+      {
+        "id": "deco_ember",
+        "type": "shape",
+        "x": -200,
+        "y": 980,
+        "width": 560,
+        "height": 560,
+        "shape_type": "ellipse",
+        "fill_color": "rgba(232,106,58,1)",
+        "opacity": 0.22,
+        "z_index": 2
+      },
+      {
+        "id": "logo",
+        "type": "image",
+        "x": 80,
+        "y": 64,
+        "width": 220,
+        "height": 74,
+        "asset_id": "solstice_logo_lockup.png",
+        "fit": "contain",
+        "z_index": 3
+      },
+      {
+        "id": "eyebrow",
+        "type": "text",
+        "x": 80,
+        "y": 196,
+        "width": 600,
+        "height": 32,
+        "content": "SOLSTICE PRESENTS",
+        "font_family": "Solstice Sans",
+        "font_size": 22,
+        "color": "rgba(240,178,66,1)",
+        "text_align": "left",
+        "font_weight": "bold",
+        "letter_spacing": 4,
+        "z_index": 4
+      },
+      {
+        "id": "headline",
+        "type": "text",
+        "x": 80,
+        "y": 236,
+        "width": 900,
+        "height": 236,
+        "content": "Golden Hour Sound Festival",
+        "font_family": "Solstice Serif",
+        "font_size": 96,
+        "color": "rgba(255,255,255,1)",
+        "text_align": "left",
+        "font_weight": "bold",
+        "line_height": 1.15,
+        "z_index": 5
+      },
+      {
+        "id": "dates_bg",
+        "type": "shape",
+        "x": 80,
+        "y": 496,
+        "width": 520,
+        "height": 64,
+        "shape_type": "rectangle",
+        "fill_color": "rgba(232,106,58,1)",
+        "corner_radius": 32,
+        "group_id": "dates",
+        "z_index": 6
+      },
+      {
+        "id": "dates_label",
+        "type": "text",
+        "x": 80,
+        "y": 513,
+        "width": 520,
+        "height": 32,
+        "content": "20-22 JUNE \u00b7 RIVERSIDE PARK",
+        "font_family": "Solstice Sans",
+        "font_size": 22,
+        "color": "rgba(255,255,255,1)",
+        "text_align": "center",
+        "font_weight": "bold",
+        "letter_spacing": 2,
+        "group_id": "dates",
+        "z_index": 7
+      },
+      {
+        "id": "lineup",
+        "type": "text",
+        "x": 80,
+        "y": 600,
+        "width": 940,
+        "height": 500,
+        "content": "FRIDAY  Marisol Vega \u00b7 The Lantern Club \u00b7 Okoye Brothers \u00b7 Saltwater Choir \u00b7 DJ Amaru \u00b7 Petal & Pine \u00b7 Northbound Static \u00b7 Ines Calloway\nSATURDAY  Harbor Lights Orchestra \u00b7 Kite Season \u00b7 Mbali Ndlovu \u00b7 The Velvet Hours \u00b7 Juniper Rail \u00b7 Sol y Sombra \u00b7 Tidepool \u00b7 Ezra Lund Trio \u00b7 Copper Moth\nSUNDAY  Aurora Fields \u00b7 Little Comets \u00b7 Rafael Montes \u00b7 Golden Syrup \u00b7 The Quiet Coast \u00b7 Hanna & The Hollows \u00b7 Moonlit Arcade \u00b7 Desert Bloom Collective",
+        "font_family": "Solstice Sans",
+        "font_size": 28,
+        "color": "rgba(255,255,255,1)",
+        "text_align": "left",
+        "line_height": 1.55,
+        "style_runs": [
+          {
+            "start": 0,
+            "end": 6,
+            "color": "rgba(240,178,66,1)",
+            "font_weight": "bold"
+          },
+          {
+            "start": 137,
+            "end": 145,
+            "color": "rgba(240,178,66,1)",
+            "font_weight": "bold"
+          },
+          {
+            "start": 291,
+            "end": 297,
+            "color": "rgba(240,178,66,1)",
+            "font_weight": "bold"
+          }
+        ],
+        "z_index": 8
+      },
+      {
+        "id": "tickets_bg",
+        "type": "shape",
+        "x": 80,
+        "y": 1124,
+        "width": 400,
+        "height": 90,
+        "shape_type": "rectangle",
+        "fill_color": "rgba(250,240,228,1)",
+        "corner_radius": 45,
+        "group_id": "tickets",
+        "z_index": 9
+      },
+      {
+        "id": "tickets_label",
+        "type": "text",
+        "x": 80,
+        "y": 1148,
+        "width": 400,
+        "height": 44,
+        "content": "Get Tickets",
+        "font_family": "Solstice Sans",
+        "font_size": 30,
+        "color": "rgba(43,27,46,1)",
+        "text_align": "center",
+        "font_weight": "bold",
+        "group_id": "tickets",
+        "z_index": 10
+      },
+      {
+        "id": "price_note",
+        "type": "text",
+        "x": 510,
+        "y": 1150,
+        "width": 520,
+        "height": 40,
+        "content": "Weekend passes from $89 \u00b7 Kids under 12 free",
+        "font_family": "Solstice Sans",
+        "font_size": 22,
+        "color": "rgba(255,255,255,0.8)",
+        "text_align": "left",
+        "z_index": 11
+      },
+      {
+        "id": "legal",
+        "type": "text",
+        "x": 80,
+        "y": 1270,
+        "width": 920,
+        "height": 28,
+        "content": "Presented with Solstice Botanical Sparkling Co. All ages. Lineup subject to change.",
+        "font_family": "Solstice Sans",
+        "font_size": 18,
+        "color": "rgba(255,255,255,0.55)",
+        "text_align": "left",
+        "z_index": 12
+      }
+    ]
+  },
+  "target_canvas": {
+    "width": 1600,
+    "height": 400
+  }
+}

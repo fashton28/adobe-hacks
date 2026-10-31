@@ -18,6 +18,22 @@ def aabb(el: dict) -> tuple[float, float, float, float]:
     return cx - aw / 2, cy - ah / 2, cx + aw / 2, cy + ah / 2
 
 
+def box(el: dict) -> tuple[float, float, float, float]:
+    """(x0, y0, x1, y1) of the element's unrotated x/y/width/height box."""
+    return el["x"], el["y"], el["x"] + el["width"], el["y"] + el["height"]
+
+
+def extent(el: dict) -> tuple[float, float, float, float]:
+    """Everything a checker may test for being on-canvas: rotated bounds and the unrotated box.
+
+    Some structural checkers (the starter `self_check`) test the unrotated
+    x/y/width/height box, others the painted, rotated bounds. Keeping this
+    union on canvas satisfies both definitions.
+    """
+    a, b = aabb(el), box(el)
+    return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
+
+
 def union(rects) -> tuple[float, float, float, float]:
     rects = list(rects)
     return (

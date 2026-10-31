@@ -85,7 +85,20 @@ Mixed groups (some art present) keep their shared group transform.
    `metrics.images` reports visible artwork dimensions after transparent padding
    and image fitting, making product/logo shrinkage easier to spot.
 
-## Current results (2026-10-30, round 2)
+## Current results (2026-10-31, round 3)
+
+All unit tests pass (`python -m unittest discover -s tests`), including the new `tests/test_robustness.py`.
+Lint is clean (`uvx ruff check pipelines scripts tests`, with `--extend-exclude tests/heldout3` while that blind set is being authored).
+Gated runs on the macOS venv, adaptive pipeline, all with zero gated failures under `--strict-quality`:
+the stress matrix (public samples, variants, source canvas, schema, determinism), and rendered runs with schema, determinism and source canvas on `input/`, `tests/fixtures`, `tests/heldout` and `tests/heldout2`.
+`scripts/docker_check.sh` passes on `input/`, `tests/fixtures`, `tests/heldout` and `tests/heldout2` (every task at most 2.3s in the container).
+`--task-only` limits a run to each task's requested target, which is the quickest visual loop.
+
+Every matrix row now also reports the round-3 composition measurements from `quality.composition`: margin violations, containment violations, artwork outside its prominence band, artwork drifting from the headline scale, oversized components, slack split unlike the source, decoration slivers and text at or below 7px.
+They feed the ranking but are not gates, because the anchored fallback cannot always satisfy them.
+Round-3 rules, container results per task and remaining weaknesses are recorded in `tested-strats.md` (2026-10-31).
+
+## Results (2026-10-30, round 2)
 
 All 56 unit tests pass (`python -m unittest discover -s tests -v`).
 Lint is clean (`uvx ruff check pipelines scripts tests`).

@@ -235,8 +235,30 @@ def _tight_key(key, width):
     return min(width, max(max(extents), widest) + WRAP_SLACK)
 
 
+def balanced_width(el: dict, size: float, width: float, base: tuple | None = None) -> float:
+    """Narrowest width that keeps the line count copy wraps to at `width`.
+
+    Like CSS `text-wrap: balance`: lines come out of similar length, so a
+    paragraph does not end in a one-word orphan line. One line stays as is.
+    """
+    lines, widest = measure(el, size, width, base)
+    if lines <= 1:
+        return width
+    lo, hi = widest / lines * 0.9, width
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        count, painted = measure(el, size, mid, base)
+        if count <= lines and painted <= mid + 1e-6:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
 def text_height(el: dict, size: float, lines: int) -> float:
-    return lines * size * float(el.get("line_height", 1.2))
+    # A zero or negative line height (schema-valid) still needs a layout box.
+    line_height = float(el.get("line_height", 1.2))
+    return lines * size * (line_height if line_height > 0 else 1.0)
 
 
 def fit_text(el: dict, width: float, max_h: float, max_size: float) -> tuple[int, float]:
