@@ -39,26 +39,31 @@ The per-pipeline comparison, known limits and design notes are in [pipelines/REA
 
 ```
 engine/
-  resize.py        <- delegates to the selected pipeline
-  main.py           <- orchestrator (input -> resize() -> output). Don't need to edit this.
-renderer/           <- the real renderer (transformer-convertor + cr-renderer), already vendored
-pipelines/          <- registered resize strategies (adaptive is the default), shared
-                       fitting/validation/quality code in common/, and api.py for tools
+  resize.py             <- delegates to the selected pipeline
+  main.py               <- orchestrator (input -> resize() -> output). Don't need to edit this.
+renderer/               <- the real renderer (transformer-convertor + cr-renderer), already vendored
+pipelines/              <- registered resize strategies (adaptive is the default), shared
+                           fitting/validation/quality code in common/, and api.py for tools
 scripts/
-  run_matrix.py     <- comparison runner: JSON outputs, metrics, renders and an HTML report
-  docker_check.sh   <- one-command offline Docker scoring rehearsal with verification
-tests/              <- contract, layout, robustness and real-renderer regressions
-  fixtures/         <- independent fixture tasks
-  heldout/          <- held-out tasks, never used for tuning (see its README)
-  heldout2/         <- a second, blind held-out corpus (see its README)
-webapp/             <- local web viewer for the engine (dev/demo tool, not in the Docker image)
-express-addon/      <- Adobe Express add-on panel, a thin client of the web viewer's API
+  run_matrix.py         <- comparison runner: JSON outputs, metrics, renders and an HTML report
+  docker_check.sh       <- one-command offline Docker scoring rehearsal with verification
+tests/                  <- contract, layout, robustness and real-renderer regressions
+  fixtures/             <- independent fixture tasks
+  heldout/              <- held-out tasks, never used for tuning (see its README)
+  heldout2/             <- a second, blind held-out corpus (see its README)
+  heldout3/             <- a third blind held-out corpus and its generator (see its README)
+webapp/                 <- local web viewer for the engine (dev/demo tool, not in the Docker image)
+express-addon/          <- Adobe Express add-on panel, a thin client of the web viewer's API
 brand_kit/
-  assets/           <- image files referenced by asset_id in the sample designs
-  fonts/            <- font files matching the schema's font_family values
-input/               <- drop task JSON files here for local testing (3 samples included)
-output/              <- results land here
-chameleon_design_schema_v0.9.json   <- full field-by-field spec for the design format
+  assets/               <- image files referenced by asset_id in the sample designs
+  fonts/                <- font files matching the schema's font_family values
+input/                  <- drop task JSON files here for local testing (3 samples included)
+output/                 <- results land here
+chameleon_design_schema_v0.9.json <- full field-by-field spec for the design format
+requirements.txt        <- runtime dependencies (pinned versions, cr-renderer at a fixed commit)
+requirements-build.txt  <- build-only dependency (hatchling, cr-renderer's build backend)
+requirements-dev.txt    <- evaluation-only dependencies (jsonschema)
+requirements.lock       <- fully pinned, hash-checked lock the Docker image installs from
 Dockerfile
 RULES.md
 ```
@@ -81,6 +86,7 @@ python3.11 -m venv .venv
 ```
 
 `requirements.txt` holds the runtime dependencies (the renderer stack); `requirements-dev.txt` adds `jsonschema` for evaluation.
+The Docker image does not install from `requirements.txt` directly: it installs the hash-pinned `requirements.lock` (see [Adding a dependency](#adding-a-dependency)).
 The commands below use `.venv/bin/python`; with the environment activated, plain `python` works too.
 
 ## Quick start (no Docker needed for iterating on `resize()`)
@@ -143,8 +149,20 @@ docker run --rm --network none \
   my-chameleon-engine
 ```
 
-`--network none` matches how stage-one scoring runs: everything your engine needs must be installed at **build** time (add it to `requirements.txt`), not fetched at run time.
+`--network none` matches how stage-one scoring runs: everything your engine needs must be installed at **build** time, not fetched at run time.
 If you're using a locally hosted model, bake its weights into the image during the build step.
+
+### Adding a dependency
+
+The image installs every package from `requirements.lock` with `--require-hashes --no-deps`, so a package added only to `requirements.txt` is not installed.
+After adding or changing a pin in `requirements.txt` (or `requirements-build.txt`), regenerate the lock with the exact command recorded at the top of `requirements.lock`:
+
+```bash
+uv pip compile requirements.txt requirements-build.txt --universal --python-version 3.11 --generate-hashes --no-emit-package cr-renderer -o requirements.lock
+```
+
+Then rebuild the image.
+The build fails with "requirements.lock is stale" if a pin in `requirements.txt` is not installed at exactly that version, so a forgotten re-lock is caught at build time rather than at scoring time.
 
 To rehearse this in one command, run:
 
@@ -152,9 +170,11 @@ To rehearse this in one command, run:
 scripts/docker_check.sh                      # build, run offline on input/, verify
 scripts/docker_check.sh --skip-build         # reuse the existing image
 scripts/docker_check.sh --input tests/heldout2
+scripts/docker_check.sh --image chameleon-mine   # use your own image tag (default: chameleon-engine)
 ```
 
-It builds the image for `linux/amd64`, runs it with `--network none` against a fresh output directory, and verifies the results: exit status, unexpected stderr, schema validity, canvas and PNG sizes, element ids, and unchanged `type`, `content`, `font_family` and `asset_id`.
+It builds the image for `linux/amd64`, runs it with `--network none` against a fresh output directory, and verifies the results: exit status, unexpected stderr, schema validity, canvas and PNG sizes, element ids, unchanged `type`, `content`, `font_family` and `asset_id`, every element box inside the canvas, and the engine's self-check lines.
+A second offline pass re-renders each output with the official renderer inside the image, reports its warnings and confirms the PNG is reproduced byte for byte.
 Artifacts and logs go to `output/docker/check-<timestamp>/`, and the script exits non-zero if any step fails.
 Verification runs on the host and needs `jsonschema` and Pillow (the `.venv` from [Setup](#setup) has both).
 

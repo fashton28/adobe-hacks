@@ -324,6 +324,65 @@ class ServerTest(unittest.TestCase):
         # The server must keep answering after bad requests.
         self.assertEqual(self.get_json("/api/health"), {"ok": True})
 
+    # ---- asset_id containment
+
+    @staticmethod
+    def image_task(asset_id):
+        source = {"canvas": {"width": 200, "height": 200}, "elements": [
+            {"id": "bg", "type": "shape", "shape_type": "rectangle", "x": 0, "y": 0, "width": 200, "height": 200,
+             "fill_color": "rgba(255,255,255,1)", "z_index": 0},
+            {"id": "img", "type": "image", "asset_id": asset_id, "x": 50, "y": 50, "width": 100, "height": 100,
+             "z_index": 1},
+        ]}
+        return {"source": source, "target_canvas": {"width": 160, "height": 120}}
+
+    def test_path_like_asset_ids_are_refused(self):
+        """The renderer opens assets_dir / asset_id, so paths would read arbitrary host images."""
+        real_image = ROOT / "brand_kit" / "assets" / "solstice_bottle.png"
+        self.assertTrue(real_image.is_file())
+        cases = (
+            str(real_image),                                # absolute POSIX path to a real image
+            "../assets/solstice_bottle.png",                # relative traversal back to a real image
+            "../../../../../../../etc/hosts",
+            "..",
+            ".",
+            "sub/solstice_bottle.png",                      # any separator, even inside the folder
+            "..\\..\\secret.png",                           # Windows separators
+            "C:\\Windows\\secret.png",
+            "C:secret.png",                                 # drive-relative
+            "solstice_bottle.png\x00.txt",
+            " solstice_bottle.png",
+            "",
+            42,
+        )
+        for asset_id in cases:
+            with self.subTest(asset_id=asset_id), patch("webapp.server.run_engine") as engine, \
+                    patch("renderer.converter.convert.render_design_to_png") as render:
+                data = self.post_json(self.image_task(asset_id), expect=400)
+                self.assertIn("asset_id", data["error"])
+                engine.assert_not_called()
+                render.assert_not_called()
+        self.assertEqual(self.get_json("/api/health"), {"ok": True})
+
+    def test_plain_asset_ids_render(self):
+        """Known assets render; an unknown plain name still gets the renderer placeholder."""
+        for asset_id, missing in (("solstice_bottle.png", False), ("not_in_brand_kit_v2.png", True),
+                                  ("logo final (1).PNG", True)):
+            with self.subTest(asset_id=asset_id):
+                task = self.image_task(asset_id)
+                data = self.post_json(task)
+                self.assertEqual(png_size(data["output_png"]), (160, 120))
+                self.assertEqual(any(asset_id in w for w in data["warnings"]), missing, data["warnings"])
+
+    def test_render_png_refuses_unsafe_designs(self):
+        """Defence in depth: designs reaching the renderer by any path are checked too."""
+        from webapp.server import BadRequest, render_png
+
+        design = self.image_task("/etc/hosts")["source"]
+        with patch("renderer.converter.convert.render_design_to_png") as render, self.assertRaises(BadRequest):
+            render_png(design)
+        render.assert_not_called()
+
     def raw_exchange(self, request: bytes) -> bytes:
         """Send raw bytes on one connection and return everything the server sends back."""
         with socket.create_connection(("127.0.0.1", self.server.server_address[1]), timeout=10) as sock:

@@ -147,6 +147,7 @@ export class ChameleonPanel extends LitElement {
         }
         this._connection = "checking";
         this._connectionError = "";
+        this._error = ""; // A run error from the previous backend is stale once we reconnect.
         const healthy = await client.isHealthy();
         if (token !== this._connectToken) {
             return;

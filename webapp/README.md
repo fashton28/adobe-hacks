@@ -64,7 +64,7 @@ The engine is called through `pipelines.api.run`; if that module is missing the 
 
 ## Security
 
-The server runs on your machine, and any web page you visit can try to reach it, so it applies three checks before doing any work.
+The server runs on your machine, and any web page you visit can try to reach it, so it applies these checks before doing any work.
 
 - **Host header.**
   When bound to loopback (the default, or `--host 127.0.0.1` / `::1`), only `localhost`, `127.0.0.1` and `[::1]` with the bound port are accepted; anything else gets 403.
@@ -80,6 +80,10 @@ The server runs on your machine, and any web page you visit can try to reach it,
 - **Request shape.**
   `POST` requires `Content-Type: application/json`, which also forces browsers to send a CORS preflight for cross-origin calls, so a page on a refused origin cannot make the server run the engine with a simple form post.
   Body size and design size are capped as described above.
+- **Asset ids.**
+  The official renderer opens `brand_kit/assets/<asset_id>` without checking that the result stays in that folder, so `POST /api/resize` returns 400 for any `asset_id` that is not a plain file name: no `/` or `\`, no `..`, no drive letter or other `:`, no control characters, no surrounding whitespace, and not `.` or empty.
+  Without this check an absolute path or a `../` path would render an arbitrary image file from your machine into the returned PNG.
+  A plain name that is not in the brand kit is still accepted and rendered as the renderer's "missing asset" placeholder.
 
 The API is read-only and serves only the repository's samples and brand files, but do not expose it on a network you do not trust.
 
@@ -89,7 +93,7 @@ The API is read-only and serves only the repository's samples and brand files, b
 .venv/bin/python -m unittest discover -s webapp/tests -t . -v
 ```
 
-The tests start the server on an ephemeral port and exercise every endpoint, including a real resize of the level-1 sample, CORS preflight, the Host, Origin and Content-Type policy, bad input, request framing, the advertised default pipeline, binding `localhost` on both IPv4 and IPv6, and a simulated engine failure.
+The tests start the server on an ephemeral port and exercise every endpoint, including a real resize of the level-1 sample, CORS preflight, the Host, Origin and Content-Type policy, path-like `asset_id` values, bad input, request framing, the advertised default pipeline, binding `localhost` on both IPv4 and IPv6, and a simulated engine failure.
 
 ## Notes
 

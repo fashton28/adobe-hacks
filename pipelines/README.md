@@ -12,7 +12,7 @@ in `<folder>/pipeline.py` and is registered in `pipelines/__init__.py`.
 | `hierarchy/` | experiment | Stacks, strips, splits and inferred full-width footers; compresses font-size ratios so supporting copy receives more space. |
 | `flow/` | working | Includes hierarchy candidates plus dynamic programming for multiple rows, choosing row breaks for arbitrary counts of groups/text/images. Rejects invalid candidates before quality ranking. |
 | `adaptive/` (default) | working | Adds vertical image bands, column flows for wide targets, independent art scaling, source-envelope fitting and a 0.45 hierarchy exponent. Fits overflowing group labels; ranks text overflow, a lost backdrop and unrelated overlaps before soft scores, with source-arrangement preference on nearby ratios. Returns diagnostics separately through `search()`. |
-| `common/` | shared | Rotated geometry, unit classification (backdrops, frames, followers, repeated sets), group transforms, renderer-aware text metrics, structural validation, independent quality metrics, row and column reflow solvers, missing-asset placement (`placeholders.py`) and the shared target-format catalogue (`formats.py`). |
+| `common/` | shared | Fidelity checks (`fidelity.py`), rotated geometry, unit classification (backdrops, frames, followers, repeated sets), group transforms, renderer-aware text metrics, structural validation, independent quality metrics, row and column reflow solvers, missing-asset placement (`placeholders.py`) and the shared target-format catalogue (`formats.py`). |
 
 ## Programmatic API
 
@@ -67,7 +67,8 @@ The rules are geometric and never read ids, names or annotations.
 | `panel` (sheet) | Ungrouped, unrotated opaque rectangle covering at least 25% of the canvas with two or more content units on top of it. | Mapped to the matching target region (relative margins kept); when it holds all copy, layout happens inside it. |
 | `decor` | Ungrouped translucent (opacity or fill alpha below 1) or bleeding shape, except dividers (`line` shapes). | Anchored to its relative spot and clamped on-canvas, or, when it tightly wraps one content unit (at most 4x its area, covering 60% of it), moved and scaled with that unit (`follow`). |
 | `text` | Ungrouped text. | Re-fitted: integer font size, wrapped, box hugging the wrapped copy. |
-| `rigid` | Images, shape art and explicit groups (a sticker overlapping a larger unit is merged into it). | One uniform transform. Units with the same member types, similar size and a shared row or column in the source form a `set` that is laid out as an even grid (all in one row, or equal rows; never 2 + 1 for three). |
+| `bridge` | Small rigid badge overlapping two larger rigid units, painted above both, centred between them. | Placed after layout at the same relative point between its hosts, scaled like them. |
+| `rigid` | Images, shape art and explicit groups (a sticker overlapping a larger unit is merged into it; content inside a card shape and overlapping artwork form composites). | One uniform transform. Units with the same member types, similar size and a shared row or column in the source form a `set` that is laid out as an even grid (all in one row, or equal rows; never 2 + 1 for three). |
 
 Layout sizes use painted bounds (`ink_box`): transparent padding of packaged art and the empty part of a text box do not take space.
 The full element box may overlap neighbours where it only holds transparent pixels, but it never leaves the canvas; art that would cross an edge shrinks about its centre, by one shared factor across a set.
@@ -79,6 +80,23 @@ The full element box may overlap neighbours where it only holds transparent pixe
 - Footers: an ungrouped text block in the bottom 10% of the source may use a full-width footer band, sized on the body's own type scale so it never outgrows the copy above.
 - Rows land near their source positions (isotonic regression); on very different aspect ratios gaps are bounded so copy reads as one block.
 - A lone unit in a row or column shrinks to fit rather than blocking the shared type scale, so a wide card cannot make every headline tiny.
+
+## Fidelity rules (round 4, `common/fidelity.py`, `common/units.py`)
+The blind round-3 review showed the engine breaking relationships the source relied on.
+Round 4 turns those relationships into constraints; everything stays geometric and reads no ids or names.
+
+- Containment composites: a unit whose painted box lies at least 85% inside a card, panel or badge shape of a rigid unit, and paints above it, is merged into that unit (innermost containers first, so nesting composes).
+  The container's own group stays the core for scale, sets and followers, so a form field and its button stay in their card and a NEW badge stays on its product card.
+- Motifs: overlapping text-free artwork (a product in front of a sun disc) is one rigid unit; translucent rings centred on it follow it even when they bled off the canvas, and all followers of one leader share one shrink factor so rings stay concentric and on canvas.
+- Bridges: a small badge straddling two content units (a VS disc between two cards) is placed after layout at the same relative point between its hosts.
+- Bleeding decorations sit flush in the edge or corner they bled over, scaled by the square root of their visible share; an opaque free decoration painted above copy shrinks toward its anchor until it stops hiding it.
+- Set grids keep at least one block gap between members (no abutting countdown cards).
+- `fidelity.check` compares source and output on a small z-aware raster (renderer paint order, shape fills, opacity, downsampled asset pixels): copy and art covered more than in the source (`occluded`), text contrast against its backdrop for every style-run colour (`contrast`), images dissolving into a same-coloured backdrop (`camouflaged`), content shapes losing their distinctness (`indistinct`), content leaving its container (`escaped`).
+  `adaptive.search` ranks the count of these right after text overflow and a lost backdrop, so they are hard constraints whenever any candidate satisfies them; it only rasterises candidates that could still win.
+- Tightly stacked copy (a name over its role, an accent rule over a tagline) that is split apart or loses its shared edge (`separated`) costs score instead of being vetoed, because satisfying it can cost legibility.
+- Faithfulness first: `preserved` and `preserved-edges` (units that hugged a source edge return to it) receive a bonus that fades from 2.0 at the same aspect ratio to nothing at a 1.6x change, when their smallest copy is legible.
+- A logo anchored to the top or bottom band of the source that drifts to mid-height costs score (`logo_adrift`), except on strips.
+- Robustness: zero-size text boxes get a 1px renderable box and a non-positive `line_height` becomes 1.0 (the official renderer rejects both); `validate` allows exactly these changes.
 
 ## Design-quality rules (round 3, `common/policy.py`)
 - Safe margins and block gaps come from `policy.spacing`; artwork prominence bands from `policy.art_band`; anchoring strength from `policy.anchor_weight`. Generators and `quality` share these numbers.

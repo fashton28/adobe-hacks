@@ -26,6 +26,11 @@ page they visit can try to reach it):
   also forces a CORS preflight for cross-origin callers, carry a
   `Content-Length` of at most MAX_BODY_BYTES (413) and hold at most
   MAX_ELEMENTS source elements (400).
+- Image `asset_id` values must be plain file names (400 otherwise): the
+  official renderer opens `assets_dir / asset_id`, so an absolute path, a
+  drive letter or a `..` component would read arbitrary images from the host.
+  A plain name that does not exist in the brand kit still renders the
+  renderer's "missing asset" placeholder.
 
 Static files are served from `webapp/static/`, brand assets from `/assets/` and
 brand fonts from `/fonts/` (all read-only).
@@ -89,6 +94,38 @@ class BadRequest(ValueError):
     """Client error reported as HTTP 400 with {"error": message}."""
 
 
+def asset_id_problem(asset_id: Any) -> str | None:
+    """Why `asset_id` is not a plain file name inside the assets folder, or None if it is.
+
+    The renderer resolves `Path(assets_dir) / asset_id` without containment, so
+    anything that could leave the folder is refused: path separators of either
+    platform, any "..", drive letters and other colons, control characters
+    (including NUL, which makes the path open raise) and the "." directory.
+    """
+    if not isinstance(asset_id, str):
+        return "must be a string"
+    if not asset_id or asset_id.strip() != asset_id:
+        return "must be a non-empty file name without surrounding whitespace"
+    if "/" in asset_id or "\\" in asset_id:
+        return "must be a plain file name without path separators"
+    if ".." in asset_id or asset_id == ".":
+        return "must not contain '..' or be '.'"
+    if ":" in asset_id:
+        return "must not contain ':' (drive letters and streams are not allowed)"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in asset_id):
+        return "must not contain control characters"
+    return None
+
+
+def check_asset_ids(design: dict) -> None:
+    """Raise BadRequest when any element of `design` carries an unsafe asset_id."""
+    for element in design.get("elements") or []:
+        if isinstance(element, dict) and element.get("asset_id") is not None:
+            problem = asset_id_problem(element["asset_id"])
+            if problem:
+                raise BadRequest(f"element {element.get('id', '?')!r}: asset_id {element['asset_id']!r} {problem}")
+
+
 # --------------------------------------------------------------------------- engine
 
 
@@ -145,6 +182,9 @@ def render_png(design: dict) -> tuple[str, list[str]]:
     """Render with the official renderer at native size; return (data URL, warnings)."""
     from renderer.converter.convert import render_design_to_png
 
+    # Defence in depth: the request was checked already, but never hand the
+    # renderer a path-like asset_id, whatever produced this design.
+    check_asset_ids(design)
     canvas = design["canvas"]
     native = max(math.ceil(canvas["width"]), math.ceil(canvas["height"]))
     RENDER_TMP.mkdir(parents=True, exist_ok=True)
@@ -202,6 +242,7 @@ def parse_resize_request(body: Any) -> tuple[dict, dict, str]:
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         detail = f"missing field {exc}" if isinstance(exc, KeyError) else str(exc)
         raise BadRequest(f"invalid input: {detail}") from exc
+    check_asset_ids(source)
     for name, canvas in (("source", source["canvas"]), ("target", target)):
         if max(canvas["width"], canvas["height"]) > MAX_CANVAS_SIDE:
             raise BadRequest(f"{name} canvas sides must be at most {MAX_CANVAS_SIDE}px")

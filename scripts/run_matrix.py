@@ -37,6 +37,7 @@ def summarize(records):
             "quality_failures": sum(bool(r.get("quality_problems")) for r in rows),
             "overflow_cases": sum(r["metrics"]["text_overflows"] > 0 for r in measured),
             "overlap_cases": sum(r["metrics"]["overlap_pairs"] > 0 for r in measured),
+            "fidelity_cases": sum(r["metrics"].get("fidelity_violations", 0) > 0 for r in measured),
             "backdrop_cases": sum(r["metrics"]["backdrop_shortfall"] > BACKDROP_SLACK for r in measured),
             "empty_canvas_cases": sum(r["metrics"]["empty_output"] - r["metrics"]["empty_source"] > EMPTY_GROWTH
                                       for r in measured),
@@ -102,7 +103,8 @@ def write_html(outdir, records, sources):
             q = r.get("metrics", {})
             parts.append(f"<p>Score {r.get('score', 0):.2f}; {r['elapsed_ms']:.0f} ms<br>"
                          f"Minimum font {q.get('min_font', 0):.1f}px; below 6px: {q.get('below_6px', 0)}<br>"
-                         f"Text overflows: {q.get('text_overflows', 0)}; overlaps: {q.get('overlap_pairs', 0)}</p>")
+                         f"Text overflows: {q.get('text_overflows', 0)}; overlaps: {q.get('overlap_pairs', 0)}; "
+                         f"fidelity violations: {q.get('fidelity_violations', 0)}</p>")
             parts.append(f"<p>Source arrangement shift: {q.get('layout_shift', 0):.3f}<br>"
                          f"Backdrop coverage: {q.get('backdrop_coverage') if q.get('backdrop_coverage') is None else format(q['backdrop_coverage'], '.0%')}; "
                          f"empty canvas: {q.get('empty_output', 0):.0%} (source {q.get('empty_source', 0):.0%})</p>")
@@ -156,7 +158,7 @@ def main(argv=None) -> int:
         from renderer.converter.convert import render_design_to_png
         render = render_design_to_png
     records, source_pngs, bad = [], {}, 0
-    print(f"{'source':42} {'target':18} {'pipeline':10} {'score':>7} {'min px':>7} {'<6':>3} {'clip':>4} {'ovlp':>4} {'ms':>7}  problems", flush=True)
+    print(f"{'source':42} {'target':18} {'pipeline':10} {'score':>7} {'min px':>7} {'<6':>3} {'clip':>4} {'ovlp':>4} {'fid':>4} {'ms':>7}  problems", flush=True)
     for path in files:
         task = json.loads(path.read_text(encoding="utf-8"))
         src = task["source"]
@@ -244,7 +246,7 @@ def main(argv=None) -> int:
                     records.append(r)
                     print(f"{tag:42} {tname:18} {name:10} {r.get('score', 0):7.2f} {q.get('min_font', 0):7.2f} "
                           f"{q.get('below_6px', 0):3} {q.get('text_overflows', 0):4} {q.get('overlap_pairs', 0):4} "
-                          f"{r['elapsed_ms']:7.0f}  {'; '.join((r['problems'] + r['quality_problems'])[:2])}", flush=True)
+                          f"{q.get('fidelity_violations', 0):4} {r['elapsed_ms']:7.0f}  {'; '.join((r['problems'] + r['quality_problems'])[:2])}", flush=True)
     report = {"python": platform.python_version(), "platform": platform.platform(),
               "real_renderer": bool(render), "schema_checked": bool(schema_validator),
               "gates": {"strict_quality": args.strict_quality, "min_font": args.min_font,

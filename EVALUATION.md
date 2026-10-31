@@ -85,6 +85,20 @@ Mixed groups (some art present) keep their shared group transform.
    `metrics.images` reports visible artwork dimensions after transparent padding
    and image fitting, making product/logo shrinkage easier to spot.
 
+## Current results (2026-10-31, round 4)
+
+All 73 unit tests pass (`python -m unittest discover -s tests`), including the new `tests/test_fidelity.py` and the renderer-backed robustness tests.
+Lint is clean (`uvx ruff check pipelines scripts tests --extend-exclude tests/heldout3/generate.py`).
+Gated runs on the macOS venv, adaptive pipeline, with zero gated failures under `--strict-quality`: the stress matrix (168 cases, schema, variants, source canvas, determinism) and rendered runs with schema, determinism and source canvas on `input/` (39), `tests/fixtures` (30), `tests/heldout` (84), `tests/heldout2` (112) and `tests/heldout3` (112).
+`scripts/docker_check.sh --image chameleon-engine4` passes on `input/`, `tests/fixtures`, `tests/heldout`, `tests/heldout2` and `tests/heldout3`; the slowest task takes 2.4s in the container (Level 3).
+
+Every matrix row now reports `fidelity_violations` (column `fid`) and the details from `pipelines/common/fidelity.py`: occluded, contrast, camouflaged, indistinct and escaped relationships, plus soft `separated` stacks.
+The adaptive ranking treats the violation count as a hard tier; at the requested targets every task in all five corpora selects a layout with zero violations (round-3 outputs had 3 on heldout3_02, 2 on heldout3_05, 3 on heldout3_07, 1 on heldout3_08 and 2 on heldout_04).
+Across all development targets, two cases keep one violation because no candidate satisfies every relationship.
+Fidelity is not a `--strict-quality` gate, for that reason.
+
+A fuzz loop over random designs (rotated groups, missing assets, text only, tiny and huge canvases, bleeding elements, zero sizes) must validate and render with the official renderer; a small deterministic version runs in `tests/test_robustness.py`.
+
 ## Current results (2026-10-31, round 3)
 
 All unit tests pass (`python -m unittest discover -s tests`), including the new `tests/test_robustness.py`.

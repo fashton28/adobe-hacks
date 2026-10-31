@@ -23,6 +23,7 @@ from .text import (
     tight_width,
 )
 from .units import (
+    EXTRAS,
     build_units,
     clamp_unit,
     copy_design,
@@ -265,15 +266,16 @@ def _set_block(fit, item, width, k, gamma, height=math.inf, exact=False):
             continue
         rows = [list(range(r, min(r + c, m))) for r in range(0, m, c)]
         unit_heights = [max(inks[i][1] for i in row) for row in rows]
-        s = min(s0, width / max(c * widest, 1e-9),
-                (width + 2 * gap) / max((c - 1) * widest + boxed, 1e-9))
+        # Members never abut: c columns keep at least one block gap between them.
+        s = min(s0, (width - gap * (c - 1)) / max(c * widest, 1e-9),
+                (width + 2 * gap - gap * (c - 1)) / max((c - 1) * widest + boxed, 1e-9))
         n_gaps, tallest = len(rows) - 1, max(unit_heights)
         if height < math.inf:
             s = min(s, (height - gap * n_gaps) / max(sum(unit_heights), 1e-9),
                     height / max(sum(unit_heights) + SET_ROW_GAP * tallest * n_gaps, 1e-9))
         if s <= 0 or (exact and s < s0 - 1e-9) or s < floor - 1e-9:
             continue
-        cell = min(width / c, widest * s + max(gap, 0.25 * widest * s))
+        cell = min(width / c, widest * s + max(gap, 0.25 * widest * s)) if c > 1 else min(width, widest * s + gap)
         # Cells follow painted ink; the outer members' full boxes (labels
         # wider than their text) must still fit, give or take the margins.
         if widest * s > cell + 1e-6 or c * cell > width + 1e-6 or (c - 1) * cell + boxed * s > width + 2 * gap + 1e-6:
@@ -397,6 +399,9 @@ def _column(fit, items, k, gamma, H):
                 el, size, base = texts[i]
                 lines, widest = measure(el, size, width, base)
                 if widest > width + 1e-6:
+                    return None
+                # A column never stacks copy one word per line (a sliver of a label).
+                if lines > 1 and len(str(el.get("content", "")).split()) / lines < 1.5:
                     return None
                 laid.append(("text", u, width, text_height(el, size, lines), size))
             elif fixed[i] is None:
@@ -768,7 +773,7 @@ def _rule(src, u):
 
 def content_items(units):
     """Content units in reading order, with repeated sets merged into one item."""
-    content = [u for u in units if u["kind"] not in ("bg", "decor", "panel")]
+    content = [u for u in units if u["kind"] not in EXTRAS]
     items, sets = [], {}
     for u in content:
         if "set" in u:
@@ -863,7 +868,7 @@ def candidates(src, target, mode="stack", image_scale=1.0,
     units = build_units(src)
     if defer_missing:
         for u in units:
-            if u["kind"] not in ("bg", "decor", "panel") and unavailable_unit(src, u):
+            if u["kind"] not in EXTRAS and unavailable_unit(src, u):
                 u["kind"] = "decor"
                 u.pop("set", None)
     content = content_items(units)

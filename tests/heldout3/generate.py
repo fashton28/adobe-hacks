@@ -42,7 +42,8 @@ def img(id_, x, y, w, h, asset, fit="contain", **kw):
 
 
 def rect(id_, x, y, w, h, fill, radius=0, **kw):
-    el = dict(id=id_, type="shape", x=x, y=y, width=w, height=h, shape_type="rectangle", fill_color=fill)
+    el = {"id": id_, "type": "shape", "x": x, "y": y, "width": w, "height": h, "shape_type": "rectangle",
+          "fill_color": fill}
     if radius:
         el["corner_radius"] = radius
     el.update(kw)
@@ -55,8 +56,8 @@ def ell(id_, x, y, w, h, fill, **kw):
 
 def txt(id_, x, y, w, h, content, size, color, family=SANS, bold=False, italic=False,
         align="left", **kw):
-    el = dict(id=id_, type="text", x=x, y=y, width=w, height=h, content=content,
-              font_family=family, font_size=size, color=color, text_align=align)
+    el = {"id": id_, "type": "text", "x": x, "y": y, "width": w, "height": h, "content": content,
+          "font_family": family, "font_size": size, "color": color, "text_align": align}
     if bold:
         el["font_weight"] = "bold"
     if italic:
@@ -110,17 +111,17 @@ def menu_special():
         txt("footer", 80, 966, 920, 34, "Served 5-10 pm daily · Reserve at solstice.com/dine", 22,
             rgba(CREAM, 0.65)),
     ]
-    return dict(
-        task_id="heldout3_01_menu_special",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Restaurant menu special on a solid shape background (no photo backdrop). "
-               "Square to a 728x90 leaderboard: a long serif headline, a 3-line description, "
-               "a rotated price badge group and a translucent pairing card must all survive an "
-               "8:1 strip. Translucent decorative circles overlap the headline area."),
-        source=dict(canvas=dict(width=1080, height=1080), elements=finish(els)),
-        target_canvas=dict(width=728, height=90),
-    )
+    return {
+        "task_id": "heldout3_01_menu_special",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Restaurant menu special on a solid shape background (no photo backdrop). "
+                  "Square to a 728x90 leaderboard: a long serif headline, a 3-line description, "
+                  "a rotated price badge group and a translucent pairing card must all survive an "
+                  "8:1 strip. Translucent decorative circles overlap the headline area."),
+        "source": {"canvas": {"width": 1080, "height": 1080}, "elements": finish(els)},
+        "target_canvas": {"width": 728, "height": 90},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -152,17 +153,17 @@ def newsletter():
         txt("social_proof", 120, 1190, 840, 40, "Join 48,000 golden hour regulars", 26,
             rgba(CREAM, 0.9), align="center"),
     ]
-    return dict(
-        task_id="heldout3_02_newsletter_card",
-        difficulty="level_2_core",
-        difficulty_label="Level 2 - Core",
-        notes=("Newsletter signup card on the gradient backdrop. A large cream card group holds "
-               "headline, body, a fake email field group and a button group; the product bottle "
-               "overlaps the card's top-right corner on purpose. Portrait 4:5 to a 300x250 "
-               "medium rectangle, so most copy must shrink hard while the form stays legible."),
-        source=dict(canvas=dict(width=1080, height=1350), elements=finish(els)),
-        target_canvas=dict(width=300, height=250),
-    )
+    return {
+        "task_id": "heldout3_02_newsletter_card",
+        "difficulty": "level_2_core",
+        "difficulty_label": "Level 2 - Core",
+        "notes": ("Newsletter signup card on the gradient backdrop. A large cream card group holds "
+                  "headline, body, a fake email field group and a button group; the product bottle "
+                  "overlaps the card's top-right corner on purpose. Portrait 4:5 to a 300x250 "
+                  "medium rectangle, so most copy must shrink hard while the form stays legible."),
+        "source": {"canvas": {"width": 1080, "height": 1350}, "elements": finish(els)},
+        "target_canvas": {"width": 300, "height": 250},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -201,17 +202,17 @@ def countdown():
         txt("legal", 1000, 990, 820, 28, "Please enjoy responsibly. 18+ only.", 18,
             rgba(WHITE, 0.5)),
     ]
-    return dict(
-        task_id="heldout3_03_launch_countdown",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Product launch countdown. Two-column 16:9 layout (large bottle left, copy right) "
-               "with a row of four translucent countdown card groups, a two-colour headline "
-               "(style_runs) and a button next to a loose date line. Target is a 9:16 story, so "
-               "the columns must stack and the four-card row must stay ordered and intact."),
-        source=dict(canvas=dict(width=1920, height=1080), elements=finish(els)),
-        target_canvas=dict(width=1080, height=1920),
-    )
+    return {
+        "task_id": "heldout3_03_launch_countdown",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Product launch countdown. Two-column 16:9 layout (large bottle left, copy right) "
+                  "with a row of four translucent countdown card groups, a two-colour headline "
+                  "(style_runs) and a button next to a loose date line. Target is a 9:16 story, so "
+                  "the columns must stack and the four-card row must stay ordered and intact."),
+        "source": {"canvas": {"width": 1920, "height": 1080}, "elements": finish(els)},
+        "target_canvas": {"width": 1080, "height": 1920},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -245,18 +246,18 @@ def testimonial():
             align="center", group_id="cta"),
         txt("url", 100, 1740, 500, 34, "solstice.com/stories", 24, rgba(WHITE, 0.6)),
     ]
-    return dict(
-        task_id="heldout3_04_testimonial",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Customer testimonial on a 9:16 story: a giant translucent quote glyph behind "
-               "a 7-line italic serif quote, a rating group of five dots plus a label, an "
-               "attribution with a bold coloured style run, the product bottle and a button. "
-               "Target is a 1280x720 YouTube thumbnail, so the long quote must reflow wide "
-               "without losing any words."),
-        source=dict(canvas=dict(width=1080, height=1920), elements=finish(els)),
-        target_canvas=dict(width=1280, height=720),
-    )
+    return {
+        "task_id": "heldout3_04_testimonial",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Customer testimonial on a 9:16 story: a giant translucent quote glyph behind "
+                  "a 7-line italic serif quote, a rating group of five dots plus a label, an "
+                  "attribution with a bold coloured style run, the product bottle and a button. "
+                  "Target is a 1280x720 YouTube thumbnail, so the long quote must reflow wide "
+                  "without losing any words."),
+        "source": {"canvas": {"width": 1080, "height": 1920}, "elements": finish(els)},
+        "target_canvas": {"width": 1280, "height": 720},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -300,18 +301,18 @@ def comparison():
         txt("new_badge_label", 1244, 81, 112, 26, "NEW", 18, CREAM, bold=True, align="center",
             letter_spacing=2, group_id="new_badge"),
     ]
-    return dict(
-        task_id="heldout3_05_product_comparison",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Two-product comparison banner (3:1). Two card groups of five elements each "
-               "(the same bottle asset appears twice), a VS badge overlapping both card edges, "
-               "a NEW badge on card B and multi-line feature lists with explicit newlines. "
-               "Target is a 2:3 Pinterest pin, so the side-by-side cards must stack or shrink "
-               "while each card's content stays inside its own card."),
-        source=dict(canvas=dict(width=1800, height=600), elements=finish(els)),
-        target_canvas=dict(width=1000, height=1500),
-    )
+    return {
+        "task_id": "heldout3_05_product_comparison",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Two-product comparison banner (3:1). Two card groups of five elements each "
+                  "(the same bottle asset appears twice), a VS badge overlapping both card edges, "
+                  "a NEW badge on card B and multi-line feature lists with explicit newlines. "
+                  "Target is a 2:3 Pinterest pin, so the side-by-side cards must stack or shrink "
+                  "while each card's content stays inside its own card."),
+        "source": {"canvas": {"width": 1800, "height": 600}, "elements": finish(els)},
+        "target_canvas": {"width": 1000, "height": 1500},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -319,13 +320,13 @@ def comparison():
 # ---------------------------------------------------------------------------
 def festival():
     days = [
-        ("FRIDAY", "Marisol Vega · The Lantern Club · Okoye Brothers · Saltwater Choir · "
-                   "DJ Amaru · Petal & Pine · Northbound Static · Ines Calloway"),
-        ("SATURDAY", "Harbor Lights Orchestra · Kite Season · Mbali Ndlovu · The Velvet Hours · "
-                     "Juniper Rail · Sol y Sombra · Tidepool · Ezra Lund Trio · Copper Moth"),
-        ("SUNDAY", "Aurora Fields · Little Comets · Rafael Montes · Golden Syrup · "
-                   "The Quiet Coast · Hanna & The Hollows · Moonlit Arcade · Desert Bloom "
-                   "Collective"),
+        ("FRIDAY", ("Marisol Vega · The Lantern Club · Okoye Brothers · Saltwater Choir · "
+                    "DJ Amaru · Petal & Pine · Northbound Static · Ines Calloway")),
+        ("SATURDAY", ("Harbor Lights Orchestra · Kite Season · Mbali Ndlovu · The Velvet Hours · "
+                      "Juniper Rail · Sol y Sombra · Tidepool · Ezra Lund Trio · Copper Moth")),
+        ("SUNDAY", ("Aurora Fields · Little Comets · Rafael Montes · Golden Syrup · "
+                    "The Quiet Coast · Hanna & The Hollows · Moonlit Arcade · Desert Bloom "
+                    "Collective")),
     ]
     lineup = "\n".join(f"{d}  {names}" for d, names in days)
     runs = [run(lineup, d, color=GOLD, font_weight="bold") for d, _ in days]
@@ -351,18 +352,18 @@ def festival():
             "Presented with Solstice Botanical Sparkling Co. All ages. Lineup subject to change.",
             18, rgba(WHITE, 0.55)),
     ]
-    return dict(
-        task_id="heldout3_06_festival_lineup",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Festival poster with very long copy: a single lineup text element of three "
-               "paragraphs (about 450 characters) with bold gold day names via style_runs, a "
-               "two-line display headline, a date pill and a ticket button, plus two large "
-               "translucent circles overlapping the copy. Portrait 4:5 to a 1600x400 wide web "
-               "banner, so the lineup must stay readable in a short, wide band."),
-        source=dict(canvas=dict(width=1080, height=1350), elements=finish(els)),
-        target_canvas=dict(width=1600, height=400),
-    )
+    return {
+        "task_id": "heldout3_06_festival_lineup",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Festival poster with very long copy: a single lineup text element of three "
+                  "paragraphs (about 450 characters) with bold gold day names via style_runs, a "
+                  "two-line display headline, a date pill and a ticket button, plus two large "
+                  "translucent circles overlapping the copy. Portrait 4:5 to a 1600x400 wide web "
+                  "banner, so the lineup must stay readable in a short, wide band."),
+        "source": {"canvas": {"width": 1080, "height": 1350}, "elements": finish(els)},
+        "target_canvas": {"width": 1600, "height": 400},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -414,18 +415,18 @@ def coupon():
         txt("url", 400, 800, 800, 40, "solstice.com/members", 26, WHITE, bold=True,
             align="center"),
     ]
-    return dict(
-        task_id="heldout3_07_discount_coupon",
-        difficulty="level_3_advanced",
-        difficulty_label="Level 3 - Advanced",
-        notes=("Discount coupon on a solid orange shape background with a dashed border built "
-               "from 50+ tiny rectangles (group dashed_border), a dashed stub divider, ticket "
-               "notches that overlap the card edge, a huge two-colour discount figure, a code "
-               "box group and a rotated ONLINE ONLY stamp. 16:9 to a 160x600 skyscraper: the "
-               "dash pattern has to stay attached to the card and the code must stay readable."),
-        source=dict(canvas=dict(width=1600, height=900), elements=finish(els)),
-        target_canvas=dict(width=160, height=600),
-    )
+    return {
+        "task_id": "heldout3_07_discount_coupon",
+        "difficulty": "level_3_advanced",
+        "difficulty_label": "Level 3 - Advanced",
+        "notes": ("Discount coupon on a solid orange shape background with a dashed border built "
+                  "from 50+ tiny rectangles (group dashed_border), a dashed stub divider, ticket "
+                  "notches that overlap the card edge, a huge two-colour discount figure, a code "
+                  "box group and a rotated ONLINE ONLY stamp. 16:9 to a 160x600 skyscraper: the "
+                  "dash pattern has to stay attached to the card and the code must stay readable."),
+        "source": {"canvas": {"width": 1600, "height": 900}, "elements": finish(els)},
+        "target_canvas": {"width": 160, "height": 600},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -451,18 +452,18 @@ def seasonal():
             italic=True, align="center"),
         img("logo", 440, 966, 200, 66, LOGO),
     ]
-    return dict(
-        task_id="heldout3_08_seasonal_greeting",
-        difficulty="level_2_core",
-        difficulty_label="Level 2 - Core",
-        notes=("Seasonal greeting card built around large decorative shapes: stacked "
-               "translucent sun rings behind the bottle, and two overlapping hill ellipses that "
-               "bleed off the canvas and sit under the sign-off and logo. Headline uses an "
-               "italic coloured style run. Square to a 3:1 X header: the decoration must be "
-               "re-composed, not just squashed, and nothing should land on top of the copy."),
-        source=dict(canvas=dict(width=1080, height=1080), elements=finish(els)),
-        target_canvas=dict(width=1500, height=500),
-    )
+    return {
+        "task_id": "heldout3_08_seasonal_greeting",
+        "difficulty": "level_2_core",
+        "difficulty_label": "Level 2 - Core",
+        "notes": ("Seasonal greeting card built around large decorative shapes: stacked "
+                  "translucent sun rings behind the bottle, and two overlapping hill ellipses that "
+                  "bleed off the canvas and sit under the sign-off and logo. Headline uses an "
+                  "italic coloured style run. Square to a 3:1 X header: the decoration must be "
+                  "re-composed, not just squashed, and nothing should land on top of the copy."),
+        "source": {"canvas": {"width": 1080, "height": 1080}, "elements": finish(els)},
+        "target_canvas": {"width": 1500, "height": 500},
+    }
 
 
 TASKS = [menu_special, newsletter, countdown, testimonial, comparison, festival, coupon,

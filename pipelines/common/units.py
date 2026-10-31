@@ -13,17 +13,28 @@ Unit kinds:
   text    ungrouped text element -> re-fitted (font size + wrapping)
   rigid   images and explicit groups -> uniformly scaled + translated as one
 
+  bridge  small badge straddling two content units (a VS disc between two
+          cards) -> placed after layout at the same relative spot between
+          its hosts (`hosts` holds their indices)
+
+Composites (round 4, fidelity): content painted inside a card, panel or badge
+shape is merged into that shape's unit, recursively, so a form field and its
+button stay in their card; overlapping artwork (a product in front of a sun
+disc) forms one rigid motif; translucent rings centred on a motif follow it.
+
 Rigid units that repeat (same member types, similar size, aligned in the
 source, like three product cards or a row of pills) share a `set` id so the
 layout keeps them together in an even grid.
 """
 
 import copy
+import math
 import re
 
 from .geometry import aabb, extent, union
 from .validate import BAND_SPAN, EDGE, edge_band, is_background
 
+EXTRAS = ("bg", "decor", "panel", "bridge")  # kinds placed around the content, not laid out
 BACKDROP_COVER = 0.85  # fraction of the source canvas a backdrop covers
 PANEL_COVER = 0.25  # inset sheets behind most of the copy
 FOLLOW_AREA = 4.0  # a following decoration is at most this many times the unit's area
@@ -108,14 +119,15 @@ def _area(box) -> float:
 
 
 def _signature(source, u):
+    """Member types of the unit's core (its own group, without merged stickers or contents)."""
     return tuple(sorted((source["elements"][i]["type"], source["elements"][i].get("shape_type", ""))
-                        for i in u["idx"]))
+                        for i in u.get("core_idx", u["idx"])))
 
 
 def _similar(a, b, source) -> bool:
     if _signature(source, a) != _signature(source, b):
         return False
-    (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a["bbox"], b["bbox"]
+    (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a.get("core_bbox", a["bbox"]), b.get("core_bbox", b["bbox"])
     aw, ah, bw, bh = ax1 - ax0, ay1 - ay0, bx1 - bx0, by1 - by0
     if min(aw, ah, bw, bh) <= 0:
         return False
@@ -212,27 +224,34 @@ def build_units(source: dict) -> list[dict]:
         if len(covered) >= 2:
             u["kind"], u["panel"] = "panel", "sheet"
     units = _attach_stickers(source, units)
-    content = [u for u in units if u["kind"] in ("text", "rigid")]
+    units = _merge_contained(source, units)
+    units = _merge_motifs(source, units)
+    _mark_bridges(source, units)
     # A translucent shape wrapped tightly around one content unit (a glow or
     # halo behind a product) travels with that unit instead of the canvas.
+    # Rings centred on a unit follow it too, even when they bled off the
+    # canvas, so a sun and its halo stay concentric.
     for u in units:
         if u["kind"] != "decor":
             continue
         x0, y0, x1, y1 = u["bbox"]
-        if x0 < 0 or y0 < 0 or x1 > canvas["width"] or y1 > canvas["height"]:
-            continue
+        bleeds = x0 < 0 or y0 < 0 or x1 > canvas["width"] or y1 > canvas["height"]
         best = None
         for j, v in enumerate(units):
             if v["kind"] not in ("text", "rigid"):
                 continue
             vb = v.get("core_bbox", v["bbox"])  # a glow follows the product, not its sticker
             inner = _area(vb)
-            if inner <= 0 or _area(u["bbox"]) > FOLLOW_AREA * inner:
+            if inner <= 0:
                 continue
             ox = max(0.0, min(x1, vb[2]) - max(x0, vb[0]))
             oy = max(0.0, min(y1, vb[3]) - max(y0, vb[1]))
             share = ox * oy / inner
-            if share >= 0.6 and (best is None or share > best[0]):
+            ring = (v["art"] or v.get("core_art")) and _concentric(u["bbox"], v["bbox"])
+            limit = RING_AREA if ring else FOLLOW_AREA
+            if share < 0.6 or _area(u["bbox"]) > limit * inner or (bleeds and not ring):
+                continue
+            if best is None or share > best[0]:
                 best = (share, j)
         if best is not None:
             u["follow"] = best[1]
@@ -295,6 +314,153 @@ def _attach_stickers(source, units):
     return merged
 
 
+CONTAIN = 0.85  # share of a unit's painted box inside a container shape that makes it content
+MOTIF_OVERLAP = 0.25  # share of the smaller artwork's painted box overlapping another
+RING_AREA = 16.0  # a concentric ring may be this many times its leader's area
+RING_OFFSET = 0.2  # centre distance, share of the ring's short side, that still counts as concentric
+BRIDGE_TOUCH = 0.02  # least share of a bridge's box lying on each of its hosts
+
+
+def _order(source):
+    """Paint position of each element (renderer: stable sort on z_index, default 0)."""
+    els = source["elements"]
+    ranked = sorted(range(len(els)), key=lambda i: (els[i].get("z_index", 0) or 0, i))
+    return {i: n for n, i in enumerate(ranked)}
+
+
+def _share_in(box, outer) -> float:
+    w = min(box[2], outer[2]) - max(box[0], outer[0])
+    h = min(box[3], outer[3]) - max(box[1], outer[1])
+    return max(0.0, w) * max(0.0, h) / max(_area(box), 1e-9)
+
+
+def _merged(host, parts, core_art=None):
+    """One rigid unit made of `host` (kept as the core) and `parts`."""
+    every = [host, *parts]
+    core_idx = host.get("core_idx", host["idx"])
+    return {"idx": sorted(i for p in every for i in p["idx"]), "kind": "rigid",
+            "bbox": union(p["bbox"] for p in every), "ink": union(p["ink"] for p in every),
+            "core_idx": list(core_idx), "core_bbox": host.get("core_bbox", host["bbox"]),
+            "core_ink": host.get("core_ink", host["ink"]), "art": all(p["art"] for p in every),
+            "images_only": all(p["images_only"] for p in every),
+            "core_art": host.get("core_art", host["art"]) if core_art is None else core_art}
+
+
+def _merge_contained(source, units):
+    """Merge content painted inside a card, panel or badge shape into that shape's unit.
+
+    A unit is content of a container when at least CONTAIN of its painted box
+    lies inside a (non-line) shape of a rigid unit, every one of its members
+    paints above that shape, and it is smaller than the shape. Innermost
+    containers merge first, so nested cards compose recursively; the
+    container's unit stays the core (its own group geometry and scale).
+    """
+    els = source["elements"]
+    order = _order(source)
+    while True:
+        best = None
+        for h, host in enumerate(units):
+            if host["kind"] != "rigid":
+                continue
+            for c in host["idx"]:
+                m = els[c]
+                if m["type"] != "shape" or m.get("shape_type") == "line" or m["width"] <= 0 or m["height"] <= 0:
+                    continue
+                cb = aabb(m)
+                for v, unit in enumerate(units):
+                    if (v == h or unit["kind"] not in ("text", "rigid") or _area(unit["ink"]) >= _area(cb)
+                            or min(order[i] for i in unit["idx"]) <= order[c]
+                            or _share_in(unit["ink"], cb) < CONTAIN):
+                        continue
+                    key = (_area(cb), c, min(unit["idx"]))
+                    if best is None or key < best[0]:
+                        best = (key, h, v)
+        if best is None:
+            return units
+        _, h, v = best
+        merged = _merged(units[h], [units[v]])
+        units = [merged if n == h else u for n, u in enumerate(units) if n != v]
+
+
+def _merge_motifs(source, units):
+    """Merge overlapping text-free artwork (a product in front of a sun disc) into one rigid motif.
+
+    The largest image (or the larger unit) stays the core, so artwork
+    prominence and followers keep referring to the product.
+    """
+    from .assets import unavailable_unit
+
+    def candidate(u):
+        return u["kind"] == "rigid" and u["art"] and not unavailable_unit(source, u)
+
+    while True:
+        pair = None
+        for a in range(len(units)):
+            if not candidate(units[a]):
+                continue
+            for b in range(a + 1, len(units)):
+                if not candidate(units[b]):
+                    continue
+                ia, ib = units[a]["ink"], units[b]["ink"]
+                small = ia if _area(ia) <= _area(ib) else ib
+                big = ib if small is ia else ia
+                if _share_in(small, big) >= MOTIF_OVERLAP:
+                    pair = (a, b)
+                    break
+            if pair:
+                break
+        if pair is None:
+            return units
+        a, b = pair
+
+        def weight(u):
+            images = any(source["elements"][i]["type"] == "image" for i in u.get("core_idx", u["idx"]))
+            return (images, _area(u.get("core_ink", u["ink"])), -min(u["idx"]))
+
+        host, part = (units[a], units[b]) if weight(units[a]) >= weight(units[b]) else (units[b], units[a])
+        merged = _merged(host, [part], core_art=True)
+        units = [merged if n == a else u for n, u in enumerate(units) if n != b]
+
+
+def _mark_bridges(source, units):
+    """A small badge painted over the meeting point of two content units becomes a bridge.
+
+    It overlaps both (BRIDGE_TOUCH of its box each), paints above them, is
+    at most STICKER_AREA of each, and its centre lies between their centres.
+    After layout it is put back at the same spot between its hosts.
+    """
+    els = source["elements"]
+    for b in units:
+        if b["kind"] != "rigid" or not any(els[i]["type"] == "shape" for i in b["idx"]):
+            continue
+        hosts = []
+        for j, h in enumerate(units):
+            if h is b or h["kind"] != "rigid" or _area(b["bbox"]) > STICKER_AREA * _area(h["bbox"]):
+                continue
+            if _share_in(b["bbox"], h.get("core_bbox", h["bbox"])) < BRIDGE_TOUCH or _z(source, b) <= max(
+                    els[i].get("z_index", i) for i in h.get("core_idx", h["idx"])):
+                continue
+            hosts.append(j)
+        if len(hosts) != 2:
+            continue
+        (a0, a1), (c0, c1) = _centre(units[hosts[0]]["bbox"]), _centre(units[hosts[1]]["bbox"])
+        bx, by = _centre(b["bbox"])
+        dx, dy = c0 - a0, c1 - a1
+        t = ((bx - a0) * dx + (by - a1) * dy) / max(dx * dx + dy * dy, 1e-9)
+        if 0.0 < t < 1.0:
+            b["kind"], b["hosts"], b["between"] = "bridge", hosts, t
+
+
+def _centre(box):
+    return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+
+def _concentric(ring, inner) -> bool:
+    (rx, ry), (ix, iy) = _centre(ring), _centre(inner)
+    short = min(ring[2] - ring[0], ring[3] - ring[1])
+    return ((rx - ix) ** 2 + (ry - iy) ** 2) ** 0.5 <= RING_OFFSET * short
+
+
 def _assign_carriers(source, units):
     """Panels (edge bands, sheets) record the content units sitting on them.
 
@@ -314,10 +480,19 @@ def _assign_carriers(source, units):
 
 
 def copy_design(source: dict, target: dict) -> dict:
-    return {
-        "canvas": {"width": target["width"], "height": target["height"]},
-        "elements": copy.deepcopy(source["elements"]),
-    }
+    """A fresh output design: the source elements on the target canvas.
+
+    A non-positive text line height (schema-valid, rejected by the renderer)
+    becomes 1.0, the value text measurement already assumes for it.
+    """
+    elements = copy.deepcopy(source["elements"])
+    for el in elements:
+        if el.get("type") == "text" and isinstance(el.get("line_height"), (int, float)) and el["line_height"] <= 0:
+            el["line_height"] = 1.0
+    return {"canvas": {"width": target["width"], "height": target["height"]}, "elements": elements}
+
+
+MIN_TEXT_BOX = 1.0  # px: smallest text box side the official renderer accepts (it requires > 0)
 
 
 def place_rigid(out: dict, src: dict, unit: dict, s: float, tx: float, ty: float, origin: str = "bbox") -> None:
@@ -336,6 +511,12 @@ def place_rigid(out: dict, src: dict, unit: dict, s: float, tx: float, ty: float
         o["width"], o["height"] = m["width"] * s, m["height"] * s
         o["x"], o["y"] = cx - o["width"] / 2, cy - o["height"] / 2
         if m["type"] == "text":
+            # The renderer rejects text boxes without area (schema-valid in a
+            # source): such a box becomes MIN_TEXT_BOX px about the same centre.
+            for size, pos in (("width", "x"), ("height", "y")):
+                if o[size] <= 0:
+                    o[pos] -= (MIN_TEXT_BOX - o[size]) / 2
+                    o[size] = MIN_TEXT_BOX
             o["font_size"] = paint_size(m["font_size"] * s)
             if m.get("letter_spacing"):
                 o["letter_spacing"] = m["letter_spacing"] * (o["font_size"] / m["font_size"])
@@ -405,54 +586,194 @@ def place_panel(out: dict, src: dict, unit: dict) -> None:
             o[key] = m[key] * s
 
 
-def place_decor(out: dict, src: dict, unit: dict, s: float) -> None:
-    """Keep the decoration's relative anchor on the canvas, scaled by `s`, and clamp it on-canvas."""
-    W, H = out["canvas"]["width"], out["canvas"]["height"]
+def _bleeds(src: dict, unit: dict) -> tuple[bool, bool, bool, bool]:
+    """Which source canvas edges (left, top, right, bottom) the unit crosses."""
+    x0, y0, x1, y1 = unit["bbox"]
+    Ws, Hs = src["canvas"]["width"], src["canvas"]["height"]
+    return x0 < -0.5, y0 < -0.5, x1 > Ws + 0.5, y1 > Hs + 0.5
+
+
+def _decor_box(src: dict, unit: dict, s: float, W: float, H: float):
+    """(scale, x, y) for a free decoration: relative anchor, flush to the edges it bled over.
+
+    The output must stay on canvas, so a decoration that bled off an edge
+    or corner sits flush in that edge or corner instead, scaled by the share
+    of it that was visible (sqrt, at least BLEED_KEEP) so it keeps about its
+    painted weight rather than growing into a whole floating disc.
+    """
     Ws, Hs = src["canvas"]["width"], src["canvas"]["height"]
     x0, y0, x1, y1 = unit["bbox"]
+    left, top, right, bottom = _bleeds(src, unit)
+    if left or top or right or bottom:
+        visible = coverage(unit["bbox"], src["canvas"]) * Ws * Hs / max(_area(unit["bbox"]), 1e-9)
+        s *= max(BLEED_KEEP, min(1.0, visible ** 0.5))
     bw, bh = (x1 - x0) * s, (y1 - y0) * s
-    s2 = min(1.0, W / bw if bw else 1.0, H / bh if bh else 1.0)
-    s *= s2
-    bw, bh = bw * s2, bh * s2
+    fit = min(1.0, W / bw if bw else 1.0, H / bh if bh else 1.0)
+    s, bw, bh = s * fit, bw * fit, bh * fit
     cx, cy = (x0 + x1) / 2 / Ws * W, (y0 + y1) / 2 / Hs * H
     tx = min(max(cx - bw / 2, 0), W - bw)
     ty = min(max(cy - bh / 2, 0), H - bh)
+    if left != right:
+        tx = 0.0 if left else W - bw
+    if top != bottom:
+        ty = 0.0 if top else H - bh
+    return s, tx, ty
+
+
+BLEED_KEEP = 0.6  # least size kept by a bleeding decoration brought fully on canvas
+YIELD_STEPS = (0.85, 0.7, 0.55, 0.4)  # sizes an opaque decoration tries before it covers copy
+
+
+def place_decor(out: dict, src: dict, unit: dict, s: float) -> None:
+    """Keep the decoration's relative anchor on the canvas, scaled by `s`, flush to edges it bled over."""
+    W, H = out["canvas"]["width"], out["canvas"]["height"]
+    s, tx, ty = _decor_box(src, unit, s, W, H)
     place_rigid(out, src, unit, s, tx, ty)
 
 
-def place_follower(out: dict, src: dict, unit: dict, leader: dict) -> None:
-    """Move a decoration with the content unit it surrounds (already placed in `out`)."""
+def place_follower(out: dict, src: dict, unit: dict, leader: dict, shrink: float | None = None) -> float:
+    """Move a decoration with the content unit it surrounds (already placed in `out`).
+
+    It keeps its centre offset from the leader, scaled like the leader. When
+    the result would leave the canvas it shrinks about that centre (rings
+    stay concentric); `shrink` imposes a factor shared by all followers of
+    one leader. Returns the factor it needed on its own.
+    """
     W, H = out["canvas"]["width"], out["canvas"]["height"]
     lx0, ly0, lx1, ly1 = leader.get("core_bbox", leader["bbox"])
     nx0, ny0, nx1, ny1 = union(extent(out["elements"][i]) for i in leader.get("core_idx", leader["idx"]))
     s = min((nx1 - nx0) / max(lx1 - lx0, 1e-9), (ny1 - ny0) / max(ly1 - ly0, 1e-9))
     x0, y0, x1, y1 = unit["bbox"]
     bw, bh = (x1 - x0) * s, (y1 - y0) * s
-    shrink = min(1.0, W / bw if bw else 1.0, H / bh if bh else 1.0)
-    s *= shrink
-    bw, bh = bw * shrink, bh * shrink
-    # Keep the decoration's centre offset from the leader's centre, scaled.
     cx = (nx0 + nx1) / 2 + ((x0 + x1) / 2 - (lx0 + lx1) / 2) * s
     cy = (ny0 + ny1) / 2 + ((y0 + y1) / 2 - (ly0 + ly1) / 2) * s
+    need = min(1.0, *(2 * max(room, 0.0) / size for room, size in
+                      ((cx, bw), (W - cx, bw), (cy, bh), (H - cy, bh)) if size > 1e-9))
+    f = max(FOLLOW_MIN, need if shrink is None else min(shrink, need))
+    # The floor must never push the follower past the canvas itself.
+    f = min(f, W / bw if bw > 1e-9 else f, H / bh if bh > 1e-9 else f)
+    s, bw, bh = s * f, bw * f, bh * f
     tx = min(max(cx - bw / 2, 0), W - bw)
     ty = min(max(cy - bh / 2, 0), H - bh)
     place_rigid(out, src, unit, s, tx, ty)
+    return need
+
+
+FOLLOW_MIN = 0.3  # a follower never shrinks below this share of its leader-relative size
+
+
+def place_bridge(out: dict, src: dict, unit: dict, units: list[dict]) -> None:
+    """Put a bridge back at its relative spot between its two hosts, scaled like them."""
+    W, H = out["canvas"]["width"], out["canvas"]["height"]
+    centres, scales = [], []
+    for j in unit["hosts"]:
+        h = units[j]
+        sx0, sy0, sx1, sy1 = h.get("core_bbox", h["bbox"])
+        x0, y0, x1, y1 = union(extent(out["elements"][i]) for i in h.get("core_idx", h["idx"]))
+        centres.append(((x0 + x1) / 2, (y0 + y1) / 2))
+        scales.append(math.sqrt(max(1e-9, (x1 - x0) * (y1 - y0)) / max(1e-9, (sx1 - sx0) * (sy1 - sy0))))
+    t = unit["between"]
+    cx = centres[0][0] + t * (centres[1][0] - centres[0][0])
+    cy = centres[0][1] + t * (centres[1][1] - centres[0][1])
+    s = sum(scales) / len(scales)
+    x0, y0, x1, y1 = unit["bbox"]
+    bw, bh = (x1 - x0) * s, (y1 - y0) * s
+    fit = min(1.0, W / bw if bw else 1.0, H / bh if bh else 1.0)
+    s, bw, bh = s * fit, bw * fit, bh * fit
+    place_rigid(out, src, unit, s, min(max(cx - bw / 2, 0), W - bw), min(max(cy - bh / 2, 0), H - bh))
 
 
 def place_extras(out: dict, src: dict, units: list[dict], s: float) -> None:
-    """Place backdrops, panels and decorations once content is in `out`."""
+    """Place backdrops, panels, bridges and decorations once content is in `out`.
+
+    Followers of one leader share one shrink factor so rings stay
+    proportionate; opaque free decorations painted above copy yield
+    (shrink toward their anchor) rather than cover it.
+    """
+    followers = {}
     for u in units:
         if u["kind"] == "bg":
             place_bg(out, u)
         elif u["kind"] == "panel":
             place_panel(out, src, u)
+        elif u["kind"] == "bridge":
+            place_bridge(out, src, u, units)
         elif u["kind"] == "decor":
             leader = units[u["follow"]] if "follow" in u else None
             if leader is not None and leader["kind"] in ("text", "rigid"):
-                place_follower(out, src, u, leader)
+                followers.setdefault(u["follow"], []).append(u)
             else:
                 place_decor(out, src, u, s)
+                _yield_to_copy(out, src, units, u)
                 _clear_slivers(out, src, units, u)
+    for j, group in followers.items():
+        shared = min(place_follower(out, src, u, units[j]) for u in group)
+        if len(group) > 1:
+            for u in group:
+                place_follower(out, src, u, units[j], shared)
+
+
+def _covers(out, src, unit, units) -> float:
+    """Share of copy and art painted below `unit` that its (opaque) fill now hides, beyond the source."""
+    els = src["elements"]
+    order = _order(src)
+    z = min(order[i] for i in unit["idx"])
+    hidden = 0.0
+    for v in units:
+        if v["kind"] not in ("text", "rigid"):
+            continue
+        for i in v["idx"]:
+            if order[i] >= z:
+                continue
+            before = _point_share(ink_box(els[i]), [els[k] for k in unit["idx"]])
+            after = _point_share(ink_box(out["elements"][i]), [out["elements"][k] for k in unit["idx"]])
+            hidden += max(0.0, after - before)
+    return hidden
+
+
+def _point_share(box, shapes) -> float:
+    """Share of a 5x5 grid of points in `box` inside any of `shapes` (rectangles or ellipses, unrotated)."""
+    x0, y0, x1, y1 = box
+    hits = 0
+    for a in range(5):
+        for b in range(5):
+            px, py = x0 + (a + 0.5) * (x1 - x0) / 5, y0 + (b + 0.5) * (y1 - y0) / 5
+            for m in shapes:
+                w, h = m["width"], m["height"]
+                if w <= 0 or h <= 0 or not (m["x"] <= px <= m["x"] + w and m["y"] <= py <= m["y"] + h):
+                    continue
+                if (m.get("shape_type") == "ellipse"
+                        and ((px - m["x"] - w / 2) / (w / 2)) ** 2 + ((py - m["y"] - h / 2) / (h / 2)) ** 2 > 1):
+                    continue
+                hits += 1
+                break
+    return hits / 25
+
+
+def _yield_to_copy(out, src, units, u):
+    """An opaque free decoration painted above content shrinks toward its anchor until it stops hiding it."""
+    els = src["elements"]
+    if any(els[i]["type"] != "shape" or els[i].get("rotation", 0) or fill_alpha(els[i]) * els[i].get("opacity", 1) < 0.5
+           for i in u["idx"]):
+        return
+    if _covers(out, src, u, units) <= 0.04:
+        return
+    left, top, right, bottom = _bleeds(src, u)
+    base = union(extent(out["elements"][i]) for i in u["idx"])
+    best = None
+    for step in YIELD_STEPS:
+        bw, bh = (base[2] - base[0]) * step, (base[3] - base[1]) * step
+        # Shrink toward the edges it is anchored on (its centre otherwise).
+        tx = base[0] if left and not right else base[2] - bw if right and not left else (base[0] + base[2] - bw) / 2
+        ty = base[1] if top and not bottom else base[3] - bh if bottom and not top else (base[1] + base[3] - bh) / 2
+        scale = bw / max(u["bbox"][2] - u["bbox"][0], 1e-9)
+        place_rigid(out, src, u, scale, tx, ty)
+        covered = _covers(out, src, u, units)
+        if best is None or covered < best[0] - 1e-9:
+            best = (covered, scale, tx, ty)
+        if covered <= 0.04:
+            return
+    place_rigid(out, src, u, best[1], best[2], best[3])
 
 
 SLIVER = (0.5, 0.98)  # hidden share of a decoration that would leave only slivers visible

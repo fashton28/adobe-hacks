@@ -1,5 +1,41 @@
 # Tested strategies
 
+## Engine round 4: fidelity constraints from the blind review (2026-10-31)
+
+Driven by the round-3 judges (`output/review/round3_judges_and_review.json`): blind `tests/heldout3` averaged 3.7 against 5.1 on the seen `tests/heldout2`, and every blind failure was a broken relationship.
+`tests/heldout3` is now development data.
+All rules are geometric and read no ids, names or notes.
+
+What changed:
+- `common/fidelity.py` measures relationships on a small z-aware raster of source and output (renderer paint order, fills, opacity, downsampled asset pixels): new occlusion of copy and art, text contrast against its actual backdrop for every style-run colour, images camouflaged on a same-coloured backdrop, content shapes losing distinctness, and content escaping its container.
+  These are ranked right after text overflow and a lost backdrop in `adaptive.search` (hard constraints whenever any candidate satisfies them); the raster only runs for candidates that could still win, so search time stayed about flat.
+- Containment composites, overlapping-art motifs, concentric ring followers with a shared shrink, bridges (a badge between two cards), bleeding decorations flush in their edge or corner, opaque decorations that yield to copy, and set grids that never abut (details in `pipelines/README.md`).
+- Faithfulness first: `preserved-edges` re-anchors units that hugged a source edge; `preserved` candidates get a bonus fading out at a 1.6x aspect change.
+- Soft terms: split stacked copy or rules (`separated`, 0.5 each) and a top or bottom logo drifting to mid-height (`logo_adrift`, 0.4).
+- Columns never wrap a label one word per line.
+- Robustness: zero-size text boxes made the official renderer reject the output (reproduced through `pipelines.api.run`); they now get a 1px box, and a non-positive `line_height` becomes 1.0.
+  A fuzz loop (500 random designs with rotated groups, missing assets, text only, tiny and huge canvases, elements outside the canvas, zero sizes) found the `line_height` case and a regression in the first box fix; after the fixes all 500 validate and render with the official renderer.
+  `tests/test_robustness.py` and the new `tests/test_fidelity.py` cover these.
+
+Per task at the requested target (macOS venv selection, container renders reviewed at native size):
+- heldout3_02 newsletter card: the email field and button stay inside the cream card next to logo and bottle; no fidelity violation (round 3: field and CTA on the dark background, 3 violations); copy is still small (minimum 4px).
+- heldout3_05 product comparison: NEW stays on its card and VS sits between the stacked cards (round 3: both stray); the logo still sits alone in a side gutter.
+- heldout3_07 discount coupon: everything stays inside the coupon with full contrast, but the rigid coupon is only 128px wide in 160x600, so copy paints at 1 to 16px; round 3 was legible but broke the coupon and lost the orange `OFF` on orange.
+  A legible fix needs the coupon frame to stretch out of its group transform, which the group contract does not allow today.
+- heldout3_08 seasonal greeting: the message is no longer covered; sun, rings and bottle stay one concentric motif on the right, hills sit small in the bottom corners, the logo sits under the motif.
+- heldout3_04 testimonial: the name moved back above its role (round 3 split them across the canvas); the accent rule still floats under the quote.
+- heldout3_03 launch countdown: cards keep a gutter (round 3: 0px); the bottom fifth is still empty and the logo docks beside the product.
+- heldout3_01 menu special and 06 festival lineup: unchanged apart from a smaller corner moon; 01 copy stays 5 to 8px, 06 keeps its mixed alignments.
+- heldout_04 editorial columns: the white logo stays on its dark footer band (round 3: invisible on cream) in a three-column layout.
+- heldout2_06 minimal brand: the accent rule sits with the tagline again.
+- Level 1: `preserved` wins (logo back near its top margin, headline 75 to 70px); Level 2: centred copy column with the product and logo at right, logo still small; Level 3 unchanged.
+  Other seen tasks keep their round-3 layout.
+
+Remaining weaknesses:
+- The hard fidelity tier can choose a much less legible layout when only that one satisfies it (07 at 160x600; heldout_04 at 300x250 picks `anchored` with 2px copy to keep the logo on its band).
+- Mixed alignments inside columns (06), floating accent rules (01, 04), small logos (Level 2) and tiny copy on 728x90 remain.
+- I opened `tests/heldout4` by accident once (a glob over `tests/*/*.json` printed composite detections for four of its tasks); nothing was tuned on it, but it is no longer fully blind for this track.
+
 ## Engine round 3: design-quality rules from the AI-judge review (2026-10-31)
 
 Driven by the independent review of round-2 container outputs (`output/review/round2_judges_and_review.json`).

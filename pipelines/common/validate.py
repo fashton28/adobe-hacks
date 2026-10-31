@@ -97,6 +97,10 @@ def validate(source: dict, target: dict, out: dict) -> list[str]:
         mutable = {"x", "y", "width", "height"} | {
             "text": {"font_size", "letter_spacing"}, "shape": {"corner_radius", "stroke_width"},
         }.get(s["type"], set())
+        # A non-positive line height is schema-valid but the renderer rejects
+        # it; only then may the output replace it (with a positive one).
+        if s["type"] == "text" and "line_height" in s and s["line_height"] <= 0 < el.get("line_height", 0):
+            mutable = mutable | {"line_height"}
         for key in (s.keys() | el.keys()) - mutable:
             if (key in el) != (key in s) or el.get(key) != s.get(key):
                 problems.append(f"{el['id']}: {key} changed")
@@ -127,9 +131,12 @@ def validate(source: dict, target: dict, out: dict) -> list[str]:
             groups.setdefault(s["group_id"], []).append(s)
     # An edge band inside a group stretches with the canvas; the rest of
     # the group keeps one transform.
+    # So does a member without area (a zero-size text box), which gets a
+    # minimal renderable box and has no geometry to keep.
     for gid, members in groups.items():
         if len(members) > 1:
-            groups[gid] = [s for s in members if not edge_band(s, source["canvas"])]
+            groups[gid] = [s for s in members if not edge_band(s, source["canvas"])
+                           and not (s["type"] == "text" and (s["width"] <= 0 or s["height"] <= 0))]
     for gid, members in groups.items():
         if len(members) < 2:
             continue

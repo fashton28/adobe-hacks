@@ -196,7 +196,7 @@ select:focus-visible, input[type="number"]:focus-visible { border-color: var(--o
 .format:hover .format-body { border-color: var(--line-strong); background: var(--surface-2); }
 .format input:checked + .format-body { border-color: var(--orange); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--orange); }
 .format input:focus-visible + .format-body { box-shadow: var(--focus); }
-.format-thumb { flex: none; display: grid; place-items: center; width: 30px; height: 30px; }
+.format-thumb { flex: none; display: grid; place-items: center; width: 26px; height: 30px; } /* thumbs are at most 26px wide */
 .format-thumb span {
   display: block; border-radius: 2px; border: 1.5px solid var(--ink-2); background: #fff;
 }
@@ -204,7 +204,10 @@ select:focus-visible, input[type="number"]:focus-visible { border-color: var(--o
 .format-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .format-name {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
-  font-size: 12px; font-weight: 600; overflow-wrap: break-word;
+  font-size: 12px; font-weight: 600;
+  /* Long single words ("Leaderboard", "Skyscraper") must never split mid-word
+     without a hyphen; hyphenate properly if a narrow card ever forces it. */
+  hyphens: auto; overflow-wrap: break-word;
 }
 .format-dims { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -275,6 +278,7 @@ select:focus-visible, input[type="number"]:focus-visible { border-color: var(--o
 .banner {
   display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: var(--s3);
   padding: var(--s3) var(--s3) var(--s3) var(--s4); margin-bottom: var(--s5); border-radius: var(--r-md);
+  scroll-margin-top: calc(var(--topbar-h) + var(--s4));
 }
 .banner svg { width: 20px; height: 20px; margin-top: 1px; }
 .banner p { margin-top: 2px; overflow-wrap: anywhere; }
@@ -487,7 +491,8 @@ select:focus-visible, input[type="number"]:focus-visible { border-color: var(--o
 /* ------------------------------------------------------------------ responsive */
 
 @media (max-width: 1280px) {
-  :root { --sidebar-w: 312px; }
+  /* The sidebar keeps its full width: at 312px the two-column format cards
+     were too narrow for "Leaderboard" and split it mid-word. */
   .main { padding: var(--s5); }
 }
 @media (max-width: 1080px) {

@@ -91,6 +91,9 @@
     $("error-title").textContent = title;
     $("error-text").textContent = message;
     el.errorBanner.hidden = false;
+    // The banner sits at the top of the main column; bring it out from under
+    // the sticky top bar when the page is scrolled down (scroll-margin-top).
+    el.errorBanner.scrollIntoView({ block: "nearest" });
   }
   function clearError() { el.errorBanner.hidden = true; }
 
@@ -267,6 +270,7 @@
     $("design-level").textContent = task.difficulty_label ? task.difficulty_label.split(/\s+[\u2014-]\s+/)[0] : "-";
     $("design-level").title = task.difficulty_label || "";
     el.designCard.hidden = false;
+    window.scrollTo({ top: 0 }); // A new design starts at the top of its result.
     stopCompare();
     state.compare.results = [];
     renderCompareGrid();
@@ -688,6 +692,7 @@
         selectFormat(f.key);
         showResult(r, f.label);
         showView("result");
+        window.scrollTo({ top: 0 }); // Open the result at its title, not at the grid's scroll offset.
       });
     }
     return card;

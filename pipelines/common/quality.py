@@ -12,6 +12,7 @@ from .units import BACKDROP_COVER, build_units, coverage, fill_alpha, ink_box
 from .validate import is_background
 
 GRID = 48  # sample points per side for canvas-emptiness estimates
+OVERLAP_KEEP = 1.25  # a pair may overlap up to this multiple of its source overlap share
 BACKDROP_SLACK = 0.05  # allowed backdrop coverage shortfall before it is a failure
 EMPTY_GROWTH = 0.4  # allowed growth of empty canvas share over the source
 
@@ -105,6 +106,10 @@ def imbalance(source: dict, out: dict) -> float:
     """How much further off-centre the content mass sits than in the source."""
     units = [u for u in _units(source) if u["kind"] in ("text", "rigid") and not unavailable_unit(source, u)]
     return max(0.0, _centroid_offset(out, units, source) - _centroid_offset(source, units, source))
+
+
+def _area(box) -> float:
+    return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
 
 
 def _texty(source: dict, u: dict) -> bool:
@@ -257,7 +262,25 @@ def composition(source: dict, out: dict, units: list[dict] | None = None) -> dic
         area = max(1e-9, (box[2] - box[0]) * (box[3] - box[1]))
         hidden = min(1.0, sum(overlap_area(box, o) for o, oz in opaque if oz > z) / area)
         slivers += SLIVER[0] < hidden < SLIVER[1]
+    # Secondary artwork (a logo) anchored to the top or bottom band of the
+    # source stays a masthead or sign-off, not a mark drifting at mid-height.
+    adrift = 0
+    if H >= ADRIFT_MIN_SHAPE * W and len(band) >= 2:
+        def core_area(u):
+            b = u.get("core_ink", u["ink"])
+            return (b[2] - b[0]) * (b[3] - b[1])
+        art_units = [u for u in units if tuple(u["idx"]) in band]
+        hero = max(art_units, key=lambda u: (core_area(u), -min(u["idx"])))
+        for u in art_units:
+            if u is hero:
+                continue
+            sy = (u["ink"][1] + u["ink"][3]) / 2 / Hs
+            x0, y0, x1, y1 = _out_ink(by_id, source, u["idx"])
+            oy = (y0 + y1) / 2 / H
+            if (sy <= ADRIFT_EDGE or sy >= 1 - ADRIFT_EDGE) and ADRIFT_MIDDLE[0] < oy < ADRIFT_MIDDLE[1]:
+                adrift += 1
     return {"margin_violation": margin, "containment_violations": contained, "art_violation": art,
+            "logo_adrift": adrift,
             "art_text_change": art_text,
             "component_excess": excess, "slack_imbalance": slack, "decor_slivers": slivers}
 
@@ -265,7 +288,11 @@ def composition(source: dict, out: dict, units: list[dict] | None = None) -> dic
 COMPONENT_GROWTH = 1.25  # as the row solver: components grow at most this much more than the headline
 COMPONENT_SHORT = 0.26  # a one-label component taller than this share of the short side is oversized
 SLIVER = (0.5, 0.98)  # hidden share of a decoration that leaves only slivers visible
-ART_TEXT_SLACK = (math.log(1.5), math.log(1.6))  # free shrink / growth of art relative to the headline
+ART_TEXT_SLACK = (math.log(1.5), math.log(1.6))
+ADRIFT_EDGE = 0.25  # source centre within this share of the top or bottom edge: a masthead or sign-off
+ADRIFT_MIDDLE = (0.3, 0.7)  # output centre band that reads as drifting
+ADRIFT_MIN_SHAPE = 0.2  # not on strips (leaderboards), where everything sits at mid-height
+ADRIFT_WEIGHT = 0.4  # free shrink / growth of art relative to the headline
 
 
 def _tucked(source: dict, by_id: dict, u: dict, box, v: dict) -> bool:
@@ -284,7 +311,8 @@ def _tucked(source: dict, by_id: dict, u: dict, box, v: dict) -> bool:
     return False
 
 
-def metrics(source: dict, out: dict) -> dict:
+def metrics(source: dict, out: dict, fidelity: bool = True) -> dict:
+    """All proxies for `out`; `fidelity=False` skips the raster relationship checks (see `fidelity.py`)."""
     src_by_id = {el["id"]: el for el in source["elements"]}
     images = []
     for el in out["elements"]:
@@ -318,8 +346,9 @@ def metrics(source: dict, out: dict) -> dict:
     # renderer, so they count for collisions, but not for arrangement shift
     # (they are deliberately relocated to free space).
     # Collisions use painted bounds: transparent padding of art can overlap.
+    units = _units(source)
     boxes = [(u, union(ink_box(by_id[source["elements"][i]["id"]]) for i in u["idx"]))
-             for u in _units(source) if u["kind"] not in ("bg", "decor", "panel")]
+             for u in units if u["kind"] not in ("bg", "decor", "panel")]
     shifts = []
     for u, box in boxes:
         if unavailable_unit(source, u):
@@ -329,11 +358,21 @@ def metrics(source: dict, out: dict) -> dict:
             (box[0] + box[2]) / (2 * out["canvas"]["width"]) - (original[0] + original[2]) / (2 * source["canvas"]["width"]),
             (box[1] + box[3]) / (2 * out["canvas"]["height"]) - (original[1] + original[3]) / (2 * source["canvas"]["height"])))
     overlaps = []
+    position = {id(u): n for n, u in enumerate(units)}
     for i, (u, a) in enumerate(boxes):
         for v, b in boxes[i + 1:]:
             area = overlap_area(a, b)
             if area > 0.5 and not _tucked(source, by_id, u, a, v) and not _tucked(source, by_id, v, b, u):
                 denom = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+                if position[id(v)] in u.get("hosts", ()) or position[id(u)] in v.get("hosts", ()):
+                    continue  # a bridge straddles its hosts by design
+                # Overlaps the source design already had (a bottle over a card
+                # corner) are intended, up to about the same share.
+                # Not for missing-asset placeholders: the grey box is not the intended art.
+                src_denom = min(_area(u["ink"]), _area(v["ink"]))
+                if (not unavailable_unit(source, u) and not unavailable_unit(source, v)
+                        and area / max(denom, 1e-9) <= OVERLAP_KEEP * overlap_area(u["ink"], v["ink"]) / max(src_denom, 1e-9)):
+                    continue
                 overlaps.append({"a": [source["elements"][j]["id"] for j in u["idx"]],
                                  "b": [source["elements"][j]["id"] for j in v["idx"]],
                                  "fraction": area / max(denom, 1e-9)})
@@ -346,7 +385,15 @@ def metrics(source: dict, out: dict) -> dict:
             "missing_assets": [im["asset_id"] for im in images if not im["available"]],
             "new_text_pairs": new_text_pairs(source, out), "imbalance": imbalance(source, out),
             "tiny_text": sum(s <= TINY_PX for s in sizes),
-            **composition(source, out), **canvas_fill(source, out)}
+            **composition(source, out), **canvas_fill(source, out),
+            **(_fidelity(source, out) if fidelity else {"fidelity_violations": 0, "fidelity_soft": 0, "fidelity": []})}
+
+
+def _fidelity(source: dict, out: dict) -> dict:
+    from .fidelity import check
+
+    found = check(source, out)
+    return {"fidelity_violations": found["violations"], "fidelity_soft": found["soft"], "fidelity": found["details"]}
 
 
 def hierarchy_penalty(source: dict, out: dict) -> float:
@@ -505,4 +552,4 @@ def score(source: dict, out: dict, q: dict | None = None) -> float:
             - CONTAINMENT_WEIGHT * q["containment_violations"] - ART_WEIGHT * q["art_violation"]
             - COMPONENT_WEIGHT * q["component_excess"] - SLACK_WEIGHT * q["slack_imbalance"]
             - ART_TEXT_WEIGHT * q["art_text_change"]
-            - SLIVER_WEIGHT * q["decor_slivers"])
+            - SLIVER_WEIGHT * q["decor_slivers"] - ADRIFT_WEIGHT * q.get("logo_adrift", 0))

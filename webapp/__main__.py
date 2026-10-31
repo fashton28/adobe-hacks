@@ -5,7 +5,13 @@ import os
 import sys
 import threading
 
-from webapp.server import LOCALHOST, make_servers, origin_matches, pipeline_names, server_url
+from webapp.server import (
+    LOCALHOST,
+    make_servers,
+    origin_matches,
+    pipeline_names,
+    server_url,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

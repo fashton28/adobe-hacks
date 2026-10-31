@@ -108,7 +108,11 @@ Code changes rebuild and reload in Express automatically while `npm run start` i
 - **CORS.**
   The panel runs in a sandboxed iframe on its own origin: `https://localhost:5241` in development, and a unique `https://<add-on-id>.wxp.adobe-addons.com` subdomain once published.
   Requests to the backend are therefore cross-origin.
-  The backend answers every request with `Access-Control-Allow-Origin: *` and handles `OPTIONS` preflights, which covers both origins.
+  The backend does not use a wildcard: it checks each request's `Origin` header and, for an allowed origin, echoes that exact origin back in `Access-Control-Allow-Origin` (with `Vary: Origin`) and answers the `OPTIONS` preflight, including Chrome's `Access-Control-Request-Private-Network` header.
+  Allowed by default are loopback origins on any port over `http` or `https` (so the dev server at `https://localhost:5241` and the outside-Express preview below), `https://*.adobe.com` (Adobe Express) and `https://*.adobe-addons.com` (published panels at `https://<add-on-id>.wxp.adobe-addons.com`).
+  Any other origin gets 403 with no CORS headers, which the panel reports as a connection failure.
+  To serve the panel from another origin, start the backend with `--allow-origin`, for example `.venv/bin/python -m webapp --allow-origin https://panel.example.com` or `--allow-origin 'https://*.example.com'` (repeatable, a port may be given; `'*'` allows every origin).
+  The backend's Security section in [webapp/README.md](../webapp/README.md) describes the full Host, Origin and request-shape policy.
   The rendered PNGs come back as `data:` URLs inside the JSON, so the cross-origin isolation headers on add-on resources (COEP is `credentialless`, and Adobe says it will become `require-corp`) do not affect image loading.
 - **Mixed content.**
   The panel is an `https` page calling an `http` backend.
@@ -159,7 +163,7 @@ The Lit component itself has no automated test in this package; it was checked i
 
 Verified locally (Node 24.19.0, macOS):
 
-- `npm install`, `npm run lint`, `npm test` (25 tests) and `npm run build` succeed, and `dist/` contains `manifest.json`, `index.html` and `index.js`.
+- `npm install`, `npm run lint`, `npm test` and `npm run build` succeed, and `dist/` contains `manifest.json`, `index.html` and `index.js`.
 - `npm run package` builds the production bundle with no webpack warnings and writes `dist.zip`.
   In headless Chromium at 320 px the production build loads with no console warnings or errors, connects to `http://localhost:<port>`, runs a resize, opens the target format picker, and passes a PNG blob to a stubbed `addImage`.
 - In headless Chromium at 320 px, the built panel connects to a running `python -m webapp` over `http://localhost`, loads samples, formats and pipelines, runs a resize, shows the preview, validation and metrics, accepts an uploaded task JSON, switches target format through the picker, and calls `addImage` once for **Add to page** and 13 times for **Add all formats** with PNG blobs.

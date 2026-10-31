@@ -8,6 +8,7 @@ always structurally valid; used as the fallback for smarter pipelines.
 from typing import Any
 
 from pipelines.common.units import (
+    EXTRAS,
     build_units,
     clamp_unit,
     copy_design,
@@ -25,7 +26,7 @@ def resize(source: dict[str, Any], target_canvas: dict[str, Any]) -> dict[str, A
     out = copy_design(source, target_canvas)
     units = build_units(source)
     for u in units:
-        if u["kind"] in ("bg", "decor", "panel"):
+        if u["kind"] in EXTRAS:
             continue
         else:
             x0, y0, x1, y1 = u["bbox"]
